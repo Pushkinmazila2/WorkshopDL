@@ -194,6 +194,8 @@ once and is shown in the Settings log.
 MIT — do whatever you want, attribution appreciated.
 
 ---
+## 👷 Virustotal
+https://www.virustotal.com/gui/file/3ee0c7aa1ddbfac2496e6530652e8c71383e37b948b90d8722629c516f586b45/detection
 
 <div align="center">
 Made with ☕ and PyQt5
