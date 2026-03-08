@@ -13,7 +13,7 @@ Inspired by the original [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL
 </div>
 
 ---
-<img src="(screen/mods_downloader.png)" width="300">
+<img src="screen/mods_downloader.png" width="300">
 ---
 
 ## 🌐 README translations
