@@ -14,9 +14,10 @@ Inspired by the original [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL
 
 ---
 <img src="screen/mods_downloader.png" width="600">
+---
 | Главное меню | История игр |
 | :---: | :---: |
-| <img src="screen/mods_downloader.png" width="300"> | <img src="screen/game_list" width="300"> |
+| <img src="screen/mods_downloader.png" width="600"> | <img src="screen/game_list.png" width="600"> |
 ---
 
 ## 🌐 README translations
