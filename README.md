@@ -65,7 +65,7 @@ pip install PyQt5 requests
 ---
 
 ## 🚀 Quick Start
-
+0. Download .exe and start it )
 1. Clone or download this repository
 2. Install dependencies (see above)
 3. Run:
