@@ -1,5 +1,5 @@
 """
-WorkshopDL — Python Edition v3
+WorkshopDL — Python Edition v3.2
 Полный аналог WorkshopDL с улучшенным интерфейсом:
 - Система локализации (JSON-файлы)
 - Таблица модов с кнопками: Steam / Вкл-Выкл / Открыть папку
