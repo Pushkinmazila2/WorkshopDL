@@ -19,9 +19,9 @@ Inspired by the original [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL
 | Language | File |
 |---|---|
 | 🇬🇧 English | [README.md](README.md) ← you are here |
-| 🇷🇺 Русский | [README_RU.md](README_RU.md) |
-| 🇩🇪 Deutsch | [README_DE.md](README_DE.md) |
-| 🇨🇳 中文 | [README_ZH.md](README_ZH.md) |
+| 🇷🇺 Русский | [README_RU.md](README/RU.md) |
+| 🇩🇪 Deutsch | [README_DE.md](README/DE.md) |
+| 🇨🇳 中文 | [README_ZH.md](README/ZH.md) |
 
 > Want to add your language? See the [Translations](#-translations) section below.
 
