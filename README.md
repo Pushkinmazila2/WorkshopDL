@@ -13,13 +13,11 @@ Inspired by the original [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL
 </div>
 
 ---
+## ⬇ Download screen
 <img src="screen/mods_downloader.png" width="600">
 ---
-
-| Главное меню | История игр |
-| :---: | :---: |
-| <img src="screen/mods_downloader.png" width="45%"> | <img src="screen/game_list.png" width="45%"> |
-
+## 🔄 Mod Manager
+<img src="screen/mods_manager.png" width="600">
 ---
 
 ## 🌐 README translations
