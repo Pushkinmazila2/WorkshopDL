@@ -77,11 +77,11 @@ pip install PyQt5 requests
 ```
 WorkshopDL/
 ├── workshopdl.py        # Main application
-├── lang_en.json         # English localization (default)
-├── lang_ru.json         # Russian localization
-├── lang/                # Community language files (optional)
-│   ├── lang_de.json
-│   └── lang_zh.json
+├── lang/                # Lang (опционально)
+│   ├── de.json
+│   ├── en.json         # Английская локализация (по умолчанию
+│   ├── ru.json         # Русская локализация
+│   └── zh.json
 ├── Modules/             # Runtime data (auto-created)
 │   ├── queue.json       # Pause/resume queue
 │   ├── history.json     # Game history
