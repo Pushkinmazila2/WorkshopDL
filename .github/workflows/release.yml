@@ -55,14 +55,14 @@ jobs:
         run: pyinstaller WorkshopDL.spec
 
       - name: Package ZIP
+        shell: pwsh
         run: |
-          mkdir release
-          copy dist\WorkshopDL.exe release\
-          if exist lang_en.json copy lang_en.json release\
-          if exist lang_ru.json copy lang_ru.json release\
-          if exist lang (xcopy lang release\lang\ /E /I /Q)
-          cd release
-          powershell Compress-Archive -Path * -DestinationPath ..\WorkshopDL-windows.zip
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item dist\WorkshopDL.exe release\
+          if (Test-Path lang_en.json) { Copy-Item lang_en.json release\ }
+          if (Test-Path lang_ru.json) { Copy-Item lang_ru.json release\ }
+          if (Test-Path lang)         { Copy-Item lang release\lang -Recurse }
+          Compress-Archive -Path release\* -DestinationPath WorkshopDL-windows.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
