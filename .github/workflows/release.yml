@@ -2,16 +2,42 @@ name: Build & Release
 
 on:
   push:
-    tags:
-      - "v*"   # запускается на любой тег вида v1.0.0, v2.3.1 и т.д.
+    branches:
+      - main
+    paths:
+      - "workshopdl.py"   # срабатывает только когда меняется основной скрипт
 
 permissions:
-  contents: write   # нужно чтобы создавать релизы
+  contents: write
 
 jobs:
 
-  # ── Windows EXE ─────────────────────────────────────────────────────────────
+  # ── Генерируем версию из даты+коммита ────────────────────────────────────────
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.gen.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate version tag
+        id: gen
+        run: |
+          TAG="v$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Version: $TAG"
+
+      - name: Create git tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.gen.outputs.tag }}
+          git push origin ${{ steps.gen.outputs.tag }}
+
+  # ── Windows EXE ──────────────────────────────────────────────────────────────
   build-windows:
+    needs: version
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -23,14 +49,12 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          pip install PyQt5 requests pyinstaller
+        run: pip install PyQt5 requests pyinstaller
 
       - name: Build EXE
-        run: |
-          pyinstaller WorkshopDL.spec
+        run: pyinstaller WorkshopDL.spec
 
-      - name: Package release (ZIP с языками)
+      - name: Package ZIP
         run: |
           mkdir release
           copy dist\WorkshopDL.exe release\
@@ -48,8 +72,9 @@ jobs:
             dist/WorkshopDL.exe
             WorkshopDL-windows.zip
 
-  # ── Linux binary ────────────────────────────────────────────────────────────
+  # ── Linux binary ─────────────────────────────────────────────────────────────
   build-linux:
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -60,7 +85,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install system deps (Qt requires this on headless Ubuntu)
+      - name: Install system deps
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y libgl1 libglib2.0-0 libxkbcommon-x11-0 \
@@ -69,14 +94,12 @@ jobs:
             libxcb-xinerama0 libxcb-xfixes0
 
       - name: Install dependencies
-        run: |
-          pip install PyQt5 requests pyinstaller
+        run: pip install PyQt5 requests pyinstaller
 
       - name: Build binary
-        run: |
-          pyinstaller WorkshopDL.spec
+        run: pyinstaller WorkshopDL.spec
 
-      - name: Package release
+      - name: Package tar.gz
         run: |
           mkdir release
           cp dist/WorkshopDL release/
@@ -93,8 +116,9 @@ jobs:
             dist/WorkshopDL
             WorkshopDL-linux.tar.gz
 
-  # ── macOS app ───────────────────────────────────────────────────────────────
+  # ── macOS app ─────────────────────────────────────────────────────────────────
   build-macos:
+    needs: version
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -106,14 +130,12 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          pip install PyQt5 requests pyinstaller
+        run: pip install PyQt5 requests pyinstaller
 
       - name: Build app
-        run: |
-          pyinstaller WorkshopDL.spec
+        run: pyinstaller WorkshopDL.spec
 
-      - name: Package release
+      - name: Package ZIP
         run: |
           mkdir release
           [ -d dist/WorkshopDL.app ] && cp -r dist/WorkshopDL.app release/ || cp dist/WorkshopDL release/
@@ -128,9 +150,9 @@ jobs:
           name: macos-build
           path: WorkshopDL-macos.zip
 
-  # ── Публикация релиза ────────────────────────────────────────────────────────
+  # ── Публикация релиза ─────────────────────────────────────────────────────────
   release:
-    needs: [build-windows, build-linux, build-macos]
+    needs: [version, build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -139,26 +161,27 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "WorkshopDL ${{ github.ref_name }}"
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: "WorkshopDL ${{ needs.version.outputs.tag }}"
           body: |
-            ## WorkshopDL ${{ github.ref_name }}
+            ## WorkshopDL ${{ needs.version.outputs.tag }}
+            > Автосборка при изменении `workshopdl.py`
 
             ### 📦 Файлы
-            | Файл | Платформа | Описание |
-            |------|-----------|----------|
-            | `WorkshopDL.exe` | Windows | Исполняемый файл |
-            | `WorkshopDL-windows.zip` | Windows | EXE + языковые файлы |
-            | `WorkshopDL-linux.tar.gz` | Linux | Бинарь + языковые файлы |
-            | `WorkshopDL-macos.zip` | macOS | Приложение + языковые файлы |
+            | Файл | Платформа |
+            |------|-----------|
+            | `WorkshopDL.exe` | Windows (только exe) |
+            | `WorkshopDL-windows.zip` | Windows (exe + языки) |
+            | `WorkshopDL-linux.tar.gz` | Linux |
+            | `WorkshopDL-macos.zip` | macOS |
 
             ### 🚀 Быстрый старт
-            1. Скачай архив для своей платформы
-            2. Распакуй в любую папку
-            3. Запусти `WorkshopDL.exe` (Windows) или `WorkshopDL` (Linux/macOS)
-            4. В настройках нажми **⬇ Скачать SteamCMD автоматически**
+            1. Скачай архив для своей платформы и распакуй
+            2. Запусти `WorkshopDL.exe` (Windows) или `WorkshopDL` (Linux/macOS)
+            3. В настройках нажми **⬇ Скачать SteamCMD автоматически**
 
             ### 🌐 Языки
-            Английский и русский включены. Другие языки — кнопка **⟳** в настройках.
+            Английский и русский включены. Другие — кнопка **⟳** в настройках.
 
           files: |
             windows-build/dist/WorkshopDL.exe
