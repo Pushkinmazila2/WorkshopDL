@@ -1,10 +1,10 @@
 """
-WorkshopDL — Python Edition v3.2
+WorkshopDL — Python Edition v3
 Полный аналог WorkshopDL с улучшенным интерфейсом:
 - Система локализации (JSON-файлы)
 - Таблица модов с кнопками: Steam / Вкл-Выкл / Открыть папку
 - Отключение модов (переименование папки .disabled)
-- Скрываемые столбцы даты
+- Скрываемые столбцы дат
 - Размер мода в таблице
 - Пауза / продолжение, история игр, автопоиск Game ID
 """
@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QLineEdit, QListWidget, QListWidgetItem, QLabel,
     QTextEdit, QGroupBox, QCheckBox, QTabWidget, QMessageBox,
     QFileDialog, QProgressBar, QComboBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QSizePolicy, QAction, QToolBar
+    QHeaderView, QAbstractItemView, QSizePolicy, QAction, QToolBar, QSpinBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl
 from PyQt5.QtGui import QFont, QColor, QBrush, QDesktopServices
@@ -251,6 +251,7 @@ def fetch_collection(collection_id):
         return []
 
 def fetch_mod_details_batch(mod_ids: list) -> dict:
+    """Возвращает {mod_id: {title, time_updated, children: [mod_id, ...]}}"""
     result = {}
     for i in range(0, len(mod_ids), 100):
         chunk = mod_ids[i:i+100]
@@ -264,13 +265,48 @@ def fetch_mod_details_batch(mod_ids: list) -> dict:
             )
             for item in r.json()["response"]["publishedfiledetails"]:
                 fid = str(item.get("publishedfileid", ""))
+                # children — зависимости мода (другие моды)
+                children = [
+                    str(c["publishedfileid"])
+                    for c in item.get("children", [])
+                    if c.get("file_type", 0) == 0   # 0 = Workshop item, не DLC
+                ]
                 result[fid] = {
                     "title":        item.get("title", fid),
                     "time_updated": int(item.get("time_updated", 0)),
+                    "children":     children,
                 }
         except Exception:
             pass
     return result
+
+
+def fetch_dependencies(mod_ids: list, depth: int = 3) -> dict:
+    """
+    Рекурсивно собирает все зависимости для списка модов.
+    Возвращает {dep_id: title} — только зависимости, не сами моды.
+    depth — максимальная глубина рекурсии (защита от циклов).
+    """
+    if depth == 0 or not mod_ids:
+        return {}
+    details = fetch_mod_details_batch(mod_ids)
+    all_deps = {}
+    next_level = []
+    for mid, info in details.items():
+        for child_id in info.get("children", []):
+            if child_id not in all_deps:
+                child_info = details.get(child_id)
+                title = child_info["title"] if child_info else child_id
+                all_deps[child_id] = title
+                next_level.append(child_id)
+    # Убираем уже известные из следующего уровня
+    next_level = [x for x in next_level if x not in details]
+    if next_level:
+        deeper = fetch_dependencies(next_level, depth - 1)
+        for k, v in deeper.items():
+            all_deps.setdefault(k, v)
+    return all_deps
+
 
 # ── Воркер скачки SteamCMD ────────────────────────────────────────────────────
 STEAMCMD_ZIP_URL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
@@ -352,12 +388,14 @@ class SteamCMDInstallWorker(QThread):
 
 # ── Воркер скачки ─────────────────────────────────────────────────────────────
 class DownloadWorker(QThread):
-    log_line = pyqtSignal(str)
-    progress = pyqtSignal(int, int)
-    finished = pyqtSignal(int, int)
-    paused   = pyqtSignal(int)
+    log_line   = pyqtSignal(str)
+    progress   = pyqtSignal(int, int)
+    finished   = pyqtSignal(int, int)
+    paused     = pyqtSignal(int)
+    deps_found = pyqtSignal(dict)   # {dep_id: title}
 
-    def __init__(self, steamcmd, game_id, mod_ids, anonymous, username, password, start_from=0):
+    def __init__(self, steamcmd, game_id, mod_ids, anonymous, username, password,
+                 start_from=0, batch_size=1):
         super().__init__()
         self.steamcmd   = steamcmd
         self.game_id    = game_id
@@ -366,64 +404,164 @@ class DownloadWorker(QThread):
         self.username   = username
         self.password   = password
         self.start_from = start_from
+        self.batch_size = max(1, batch_size)
         self._stop = self._pause = False
 
     def stop(self):  self._stop  = True
     def pause(self): self._pause = True
 
     def run(self):
-        total = len(self.mod_ids)
+        # ── Проверяем зависимости перед скачкой ───────────────────────────────
+        if self.start_from == 0:
+            self.log_line.emit("🔗 Проверка зависимостей...")
+            try:
+                all_deps = fetch_dependencies(self.mod_ids)
+                known    = set(self.mod_ids)
+                new_deps = {k: v for k, v in all_deps.items() if k not in known}
+                if new_deps:
+                    self.log_line.emit(f"🔗 Найдено {len(new_deps)} зависимост(ей) — см. диалог")
+                    self.deps_found.emit(new_deps)
+                else:
+                    self.log_line.emit("🔗 Зависимостей нет")
+            except Exception as e:
+                self.log_line.emit(f"🔗 Не удалось проверить зависимости: {e}")
+
+        total   = len(self.mod_ids)
+        pending = [m for i, m in enumerate(self.mod_ids, 1) if i > self.start_from]
         success = self.start_from
-        fail = 0
-        for idx, mod_id in enumerate(self.mod_ids, start=1):
-            if idx <= self.start_from:
-                continue
+        fail    = 0
+        done    = self.start_from   # сколько обработано всего
+
+        # ── Разбиваем на пачки ────────────────────────────────────────────────
+        for batch_start in range(0, len(pending), self.batch_size):
             if self._stop:
                 queue_clear(); break
             if self._pause:
-                queue_save(self.game_id, self.mod_ids, idx - 1)
-                self.paused.emit(total - idx + 1)
+                queue_save(self.game_id, self.mod_ids, done)
+                self.paused.emit(total - done)
                 return
-            self.log_line.emit(t("log_downloading", cur=idx, total=total, mod_id=mod_id))
-            self.progress.emit(idx - 1, total)
-            ok = self._run_steamcmd(mod_id)
-            if ok:
-                success += 1
-                self.log_line.emit(t("log_ok", cur=idx, total=total, mod_id=mod_id))
+
+            batch = pending[batch_start : batch_start + self.batch_size]
+
+            if self.batch_size == 1:
+                # Одиночный режим — подробный лог по каждому
+                mod_id = batch[0]
+                done += 1
+                self.log_line.emit(t("log_downloading", cur=done, total=total, mod_id=mod_id))
+                self.progress.emit(done - 1, total)
+                results = self._run_batch(batch)
+                if results.get(mod_id):
+                    success += 1
+                    self.log_line.emit(t("log_ok", cur=done, total=total, mod_id=mod_id))
+                else:
+                    fail += 1
+                    self.log_line.emit(t("log_fail", cur=done, total=total, mod_id=mod_id))
+                    self._diagnose_failure(mod_id)
             else:
-                fail += 1
-                self.log_line.emit(t("log_fail", cur=idx, total=total, mod_id=mod_id))
-            queue_save(self.game_id, self.mod_ids, idx)
+                # Пакетный режим — одна сессия steamcmd на всю пачку
+                first = done + 1
+                last  = done + len(batch)
+                self.log_line.emit(
+                    f"\n📦 Пачка [{first}–{last}/{total}]: {len(batch)} модов..."
+                )
+                self.progress.emit(done, total)
+                results = self._run_batch(batch)
+                for mod_id in batch:
+                    done += 1
+                    if results.get(mod_id):
+                        success += 1
+                        self.log_line.emit(t("log_ok", cur=done, total=total, mod_id=mod_id))
+                    else:
+                        fail += 1
+                        self.log_line.emit(t("log_fail", cur=done, total=total, mod_id=mod_id))
+                        self._diagnose_failure(mod_id)
+                self.progress.emit(done, total)
+
+            queue_save(self.game_id, self.mod_ids, done)
+
         queue_clear()
         self.progress.emit(total, total)
         self.finished.emit(success, fail)
 
-    def _run_steamcmd(self, mod_id):
+    def _run_batch(self, mod_ids: list) -> dict:
+        """
+        Запускает одну сессию steamcmd для списка модов.
+        Возвращает {mod_id: True/False}.
+        """
         args = ([self.steamcmd, "+login", "anonymous"] if self.anonymous
                 else [self.steamcmd, "+login", self.username, self.password])
-        args += ["+workshop_download_item", self.game_id, mod_id, "+validate", "+quit"]
+        for mid in mod_ids:
+            args += ["+workshop_download_item", self.game_id, mid]
+        args += ["+quit"]
+
+        results = {mid: False for mid in mod_ids}
         try:
             flags = subprocess.CREATE_NO_WINDOW if IS_WIN else 0
-            proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                    text=True, encoding="utf-8", errors="replace", creationflags=flags)
-            ok = False
+            proc  = subprocess.Popen(
+                args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", creationflags=flags
+            )
             for line in proc.stdout:
                 line = line.rstrip()
                 if line: self.log_line.emit(line)
-                if "Success. Downloaded item" in line: ok = True
+                # "Success. Downloaded item 123456789 to ..."
+                if "Success. Downloaded item" in line:
+                    for mid in mod_ids:
+                        if mid in line:
+                            results[mid] = True
+                            break
             proc.wait()
-            return ok
         except FileNotFoundError:
-            self.log_line.emit(t("log_steamcmd_missing")); return False
+            self.log_line.emit(t("log_steamcmd_missing"))
         except Exception as e:
-            self.log_line.emit(t("log_error", err=e)); return False
+            self.log_line.emit(t("log_error", err=e))
+        return results
+
+    def _diagnose_failure(self, mod_id: str):
+        """Пытается объяснить причину ошибки через Steam API."""
+        try:
+            details = fetch_mod_details_batch([mod_id])
+            info    = details.get(mod_id)
+            if not info:
+                self.log_line.emit(f"  ⚠ [{mod_id}] Мод не найден в Steam — возможно удалён")
+                return
+            title = info.get("title", mod_id)
+            # Проверяем видимость через отдельный запрос
+            r = requests.post(
+                "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
+                data={"itemcount": "1", "publishedfileids[0]": mod_id}, timeout=8
+            )
+            item = r.json()["response"]["publishedfiledetails"][0]
+            result_code = item.get("result", 0)
+            visibility  = item.get("visibility", 0)   # 0=public,1=friends,2=private
+            banned      = item.get("banned", False)
+            ban_reason  = item.get("ban_reason", "")
+
+            if banned:
+                self.log_line.emit(f"  🚫 [{title}] Мод заблокирован Valve: {ban_reason}")
+            elif visibility == 2:
+                self.log_line.emit(f"  🔒 [{title}] Мод приватный — автор ограничил доступ")
+            elif visibility == 1:
+                self.log_line.emit(f"  🔒 [{title}] Мод доступен только друзьям автора")
+            elif result_code != 1:
+                self.log_line.emit(f"  ⚠ [{title}] Steam вернул ошибку (code={result_code})")
+            else:
+                # Мод публичный — скорее всего нужна купленная игра
+                self.log_line.emit(
+                    f"  🔑 [{title}] Мод публичный, но требует владения игрой.\n"
+                    f"     Попробуйте: Настройки → отключить анонимный режим и войти в аккаунт."
+                )
+        except Exception:
+            pass   # диагностика не критична — молча игнорируем
+
 
 # ── Воркер проверки обновлений ────────────────────────────────────────────────
 class UpdateCheckWorker(QThread):
-    # mod_id, title, local_ts, server_ts, status, folder_path, size_mb
-    mod_result = pyqtSignal(str, str, float, int, str, str, float)
-    progress   = pyqtSignal(int, int)
-    finished   = pyqtSignal(int, int)  # outdated, ok
+    # mod_id, title, local_ts, server_ts, status, folder_path, size_mb, missing_deps: list
+    mod_result   = pyqtSignal(str, str, float, int, str, str, float, list)
+    progress     = pyqtSignal(int, int)
+    finished     = pyqtSignal(int, int)   # outdated, ok
+    missing_deps = pyqtSignal(dict)       # {dep_id: title} — зависимости которых нет локально
 
     def __init__(self, mods_path: str):
         super().__init__()
@@ -431,7 +569,6 @@ class UpdateCheckWorker(QThread):
 
     def run(self):
         try:
-            # Ищем и активные и отключённые папки
             entries = []
             for e in os.scandir(self.mods_path):
                 name = e.name
@@ -444,26 +581,47 @@ class UpdateCheckWorker(QThread):
         if not entries:
             self.finished.emit(0, 0); return
 
-        # Чистые ID (без суффикса)
         def clean_id(name):
             return name[:-len(DISABLED_SUFFIX)] if name.endswith(DISABLED_SUFFIX) else name
 
         mod_ids  = [clean_id(e.name) for e in entries]
         local_ts = {clean_id(e.name): e.stat().st_mtime for e in entries}
         paths    = {clean_id(e.name): e.path for e in entries}
+        local_set = set(mod_ids)
         total    = len(mod_ids)
 
         self.progress.emit(0, total)
         server_data = fetch_mod_details_batch(mod_ids)
 
+        # Собираем все зависимости одним запросом
+        all_missing_deps = {}
+        for mid, info in server_data.items():
+            for child_id in info.get("children", []):
+                if child_id not in local_set and child_id not in all_missing_deps:
+                    # Получаем название зависимости
+                    child_info = server_data.get(child_id)
+                    all_missing_deps[child_id] = child_info["title"] if child_info else child_id
+
+        # Если есть незагруженные зависимости — уведомляем
+        if all_missing_deps:
+            self.missing_deps.emit(all_missing_deps)
+
         outdated = ok_count = 0
         for idx, mid in enumerate(mod_ids, 1):
             self.progress.emit(idx, total)
-            folder = paths.get(mid, "")
-            loc_ts = local_ts.get(mid, 0)
-            size   = folder_size_mb(folder)
-            srv    = server_data.get(mid)
+            folder   = paths.get(mid, "")
+            loc_ts   = local_ts.get(mid, 0)
+            size     = folder_size_mb(folder)
+            srv      = server_data.get(mid)
             disabled = mod_is_disabled(folder)
+
+            # Зависимости конкретно этого мода которых нет локально
+            mod_missing = []
+            if srv:
+                for child_id in srv.get("children", []):
+                    if child_id not in local_set:
+                        child_title = all_missing_deps.get(child_id, child_id)
+                        mod_missing.append((child_id, child_title))
 
             if disabled:
                 status = "disabled"
@@ -474,11 +632,112 @@ class UpdateCheckWorker(QThread):
             else:
                 status = "ok"; ok_count += 1
 
-            title    = srv["title"] if srv else mid
-            srv_ts   = srv["time_updated"] if srv else 0
-            self.mod_result.emit(mid, title, loc_ts, srv_ts, status, folder, size)
+            title  = srv["title"] if srv else mid
+            srv_ts = srv["time_updated"] if srv else 0
+            self.mod_result.emit(mid, title, loc_ts, srv_ts, status, folder, size, mod_missing)
 
         self.finished.emit(outdated, ok_count)
+
+
+# ── GitHub-интеграция языков ──────────────────────────────────────────────────
+GITHUB_REPO      = "Pushkinmazila2/WorkshopDL"
+GITHUB_LANG_API  = f"https://api.github.com/repos/{GITHUB_REPO}/contents/lang"
+GITHUB_LANG_RAW  = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/lang"
+LANG_LOCAL_DIR   = os.path.join(MODULES_PATH, "lang")   # куда сохраняем скачанные языки
+
+# Человекочитаемые имена языков по коду файла
+LANG_DISPLAY = {
+    "en": "🇬🇧 English",
+    "ru": "🇷🇺 Русский",
+    "de": "🇩🇪 Deutsch",
+    "zh": "🇨🇳 中文",
+    "fr": "🇫🇷 Français",
+    "es": "🇪🇸 Español",
+    "pl": "🇵🇱 Polski",
+    "uk": "🇺🇦 Українська",
+    "tr": "🇹🇷 Türkçe",
+    "pt": "🇵🇹 Português",
+    "ja": "🇯🇵 日本語",
+    "ko": "🇰🇷 한국어",
+}
+
+def lang_code_from_filename(filename: str) -> str:
+    """'ru.json' → 'ru'"""
+    return os.path.splitext(filename)[0].lower()
+
+def lang_display_name(code: str) -> str:
+    return LANG_DISPLAY.get(code, f"🌐 {code.upper()}")
+
+def lang_local_path(code: str) -> str:
+    return os.path.join(LANG_LOCAL_DIR, f"{code}.json")
+
+def lang_list_local() -> list:
+    """Возвращает список (code, display_name, path) локально доступных языков."""
+    result = []
+    # Сначала смотрим встроенные рядом со скриптом
+    for f in os.listdir(APP_DIR):
+        if f.startswith("lang_") and f.endswith(".json"):
+            code = f[5:-5]   # lang_ru.json → ru
+            result.append((code, lang_display_name(code), os.path.join(APP_DIR, f)))
+    # Потом из папки Modules/lang/
+    if os.path.isdir(LANG_LOCAL_DIR):
+        for f in os.listdir(LANG_LOCAL_DIR):
+            if f.endswith(".json"):
+                code = lang_code_from_filename(f)
+                path = lang_local_path(code)
+                if not any(c == code for c, _, _ in result):
+                    result.append((code, lang_display_name(code), path))
+    return sorted(result, key=lambda x: x[0])
+
+
+class LangFetchWorker(QThread):
+    """Загружает список доступных языков с GitHub и опционально скачивает один."""
+    list_ready   = pyqtSignal(list)   # [(code, display_name, is_downloaded), ...]
+    dl_progress  = pyqtSignal(str)    # статус скачки
+    dl_done      = pyqtSignal(bool, str)  # success, local_path_or_error
+
+    def __init__(self, download_code: str = ""):
+        super().__init__()
+        self.download_code = download_code   # если не пусто — скачать этот язык
+
+    def run(self):
+        if self.download_code:
+            self._download(self.download_code)
+        else:
+            self._fetch_list()
+
+    def _fetch_list(self):
+        try:
+            r = requests.get(GITHUB_LANG_API, timeout=8,
+                             headers={"Accept": "application/vnd.github.v3+json"})
+            r.raise_for_status()
+            files = r.json()
+            local_codes = {c for c, _, _ in lang_list_local()}
+            result = []
+            for f in files:
+                if f["name"].endswith(".json"):
+                    code = lang_code_from_filename(f["name"])
+                    result.append((code, lang_display_name(code), code in local_codes))
+            self.list_ready.emit(sorted(result, key=lambda x: x[0]))
+        except Exception as e:
+            self.list_ready.emit([])   # пустой список — нет соединения
+
+    def _download(self, code: str):
+        url = f"{GITHUB_LANG_RAW}/{code}.json"
+        self.dl_progress.emit(f"⬇  Загружаю {lang_display_name(code)}...")
+        try:
+            os.makedirs(LANG_LOCAL_DIR, exist_ok=True)
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            # Проверяем что это валидный JSON
+            data = r.json()
+            dest = lang_local_path(code)
+            with open(dest, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            self.dl_done.emit(True, dest)
+        except Exception as e:
+            self.dl_done.emit(False, str(e))
+
 
 # ── Главное окно ──────────────────────────────────────────────────────────────
 class MainWindow(QMainWindow):
@@ -772,25 +1031,97 @@ class MainWindow(QMainWindow):
         # ── Язык ──────────────────────────────────────────────────────────────
         grp_lang = QGroupBox(t("settings_language_group"))
         gl2 = QVBoxLayout(grp_lang)
-        gl2.addWidget(QLabel(t("settings_language_label")))
-        rl = QHBoxLayout()
+
+        # Строка 1: выпадающий список языков с GitHub + кнопка обновить список
+        row_cmb = QHBoxLayout()
+        self.cmb_lang = QComboBox()
+        self.cmb_lang.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.cmb_lang.setToolTip("Языки с GitHub — нажми ⟳ чтобы обновить список")
+        row_cmb.addWidget(self.cmb_lang)
+        self.btn_lang_refresh = QPushButton("⟳")
+        self.btn_lang_refresh.setFixedWidth(34)
+        self.btn_lang_refresh.setToolTip("Обновить список языков с GitHub")
+        self.btn_lang_refresh.clicked.connect(self._fetch_lang_list)
+        row_cmb.addWidget(self.btn_lang_refresh)
+        self.btn_lang_dl = QPushButton("⬇ Скачать")
+        self.btn_lang_dl.setFixedWidth(90)
+        self.btn_lang_dl.clicked.connect(self._download_selected_lang)
+        row_cmb.addWidget(self.btn_lang_dl)
+        self.btn_lang_apply = QPushButton(t("settings_language_apply"))
+        self.btn_lang_apply.setFixedWidth(90)
+        self.btn_lang_apply.clicked.connect(self._apply_lang_from_combo)
+        row_cmb.addWidget(self.btn_lang_apply)
+        gl2.addLayout(row_cmb)
+
+        # Статус
+        self.lbl_lang_status = QLabel("  ⟳ Нажмите ⟳ чтобы загрузить список языков с GitHub")
+        self.lbl_lang_status.setStyleSheet("color: #888;")
+        gl2.addWidget(self.lbl_lang_status)
+
+        # Строка 2: свой файл
+        row_custom = QHBoxLayout()
+        row_custom.addWidget(QLabel(t("settings_language_label")))
         self.inp_lang = QLineEdit()
         self.inp_lang.setPlaceholderText(LANG_DEF_PATH)
-        rl.addWidget(self.inp_lang)
-        btn_lang = QPushButton(t("settings_language_browse"))
-        btn_lang.clicked.connect(self._browse_lang)
-        rl.addWidget(btn_lang)
+        row_custom.addWidget(self.inp_lang)
+        btn_lang_browse = QPushButton(t("settings_language_browse"))
+        btn_lang_browse.clicked.connect(self._browse_lang)
+        row_custom.addWidget(btn_lang_browse)
+        btn_lang_file_apply = QPushButton(t("settings_language_apply"))
+        btn_lang_file_apply.clicked.connect(self._apply_language)
+        row_custom.addWidget(btn_lang_file_apply)
+        gl2.addLayout(row_custom)
 
-        # Кнопка "Применить язык" — сразу без сохранения всего
-        btn_apply_lang = QPushButton(t("settings_language_apply"))
-        btn_apply_lang.clicked.connect(self._apply_language)
-        rl.addWidget(btn_apply_lang)
-        gl2.addLayout(rl)
         gl2.addWidget(QLabel(t("settings_language_note")))
         lay.addWidget(grp_lang)
 
         btn_save = QPushButton(t("settings_save"))
         btn_save.clicked.connect(self._save_settings)
+
+        # ── Зависимости и загрузка ────────────────────────────────────────────
+        grp_deps = QGroupBox("🔗 Зависимости и загрузка")
+        gd = QVBoxLayout(grp_deps)
+
+        # Поведение зависимостей
+        gd.addWidget(QLabel("Что делать если у мода есть незагруженные зависимости:"))
+        self.cmb_deps_behavior = QComboBox()
+        self.cmb_deps_behavior.addItem("❓ Всегда спрашивать",       userData="ask")
+        self.cmb_deps_behavior.addItem("⬇ Скачивать автоматически",  userData="auto")
+        self.cmb_deps_behavior.addItem("🚫 Всегда пропускать",       userData="skip")
+        gd.addWidget(self.cmb_deps_behavior)
+
+        # Размер пачки
+        row_batch = QHBoxLayout()
+        row_batch.addWidget(QLabel("Размер пачки (модов за 1 сессию SteamCMD):"))
+        self.spn_batch = QSpinBox()
+        self.spn_batch.setRange(1, 50)
+        self.spn_batch.setValue(1)
+        self.spn_batch.setFixedWidth(70)
+        self.spn_batch.setToolTip(
+            "1 = один мод за раз (безопаснее, подробный лог)\n"
+            "5–10 = меньше переподключений, быстрее при большом списке\n"
+            "Не влияет на скорость интернета — только на число сессий SteamCMD"
+        )
+        row_batch.addWidget(self.spn_batch)
+        row_batch.addStretch()
+        gd.addLayout(row_batch)
+
+        # Очистка кеша
+        row_cache = QHBoxLayout()
+        self.btn_clear_cache = QPushButton("🧹 Очистить кеш SteamCMD")
+        self.btn_clear_cache.setToolTip(
+            "Удаляет steamcmd/userdata/ и steamcmd/steamapps/\n"
+            "Помогает если моды перестали скачиваться без причины"
+        )
+        self.btn_clear_cache.clicked.connect(self._clear_steamcmd_cache)
+        row_cache.addWidget(self.btn_clear_cache)
+        self.lbl_cache_status = QLabel("")
+        row_cache.addWidget(self.lbl_cache_status)
+        row_cache.addStretch()
+        gd.addLayout(row_cache)
+
+        lay.addWidget(grp_deps)
+
         lay.addWidget(btn_save); lay.addStretch()
         return w
 
@@ -802,12 +1133,39 @@ class MainWindow(QMainWindow):
         self.inp_pass.setText(cfg_get(self.cfg, "Steam", "Password"))
         p = cfg_get(self.cfg, "WorkshopDL", "SteamCMDPath")
         if p: self.inp_steamcmd.setText(p)
-        lang_path = cfg_get(self.cfg, "WorkshopDL", "LangPath")
-        if lang_path: self.inp_lang.setText(lang_path)
         saved_path = cfg_get(self.cfg, "WorkshopDL", "ModsUpdatePath")
         if saved_path: mod_paths_add(saved_path)
         self._reload_update_paths_combo(saved_path or "")
         self._toggle_anon()
+
+        # Загружаем поведение зависимостей
+        deps_behavior = cfg_get(self.cfg, "WorkshopDL", "DepsBehavior", "ask")
+        for i in range(self.cmb_deps_behavior.count()):
+            if self.cmb_deps_behavior.itemData(i) == deps_behavior:
+                self.cmb_deps_behavior.setCurrentIndex(i)
+                break
+
+        # Размер пачки
+        try:
+            self.spn_batch.setValue(int(cfg_get(self.cfg, "WorkshopDL", "BatchSize", "1")))
+        except Exception:
+            pass
+
+        # Загружаем сохранённый язык
+        lang_path = cfg_get(self.cfg, "WorkshopDL", "LangPath")
+        if lang_path and os.path.exists(lang_path):
+            self.inp_lang.setText(lang_path)
+            lang_load(lang_path)
+        else:
+            # Ищем язык по коду
+            lang_code = cfg_get(self.cfg, "WorkshopDL", "LangCode", "en")
+            bundled = os.path.join(APP_DIR, f"lang_{lang_code}.json")
+            local   = lang_local_path(lang_code)
+            for candidate in (bundled, local):
+                if os.path.exists(candidate):
+                    lang_load(candidate)
+                    self.inp_lang.setText(candidate)
+                    break
 
     def _save_settings(self):
         for s in ("WorkshopDL", "Steam"):
@@ -824,6 +1182,8 @@ class MainWindow(QMainWindow):
         if cur_upd:
             self.cfg["WorkshopDL"]["ModsUpdatePath"] = cur_upd
             mod_paths_add(cur_upd)
+        self.cfg["WorkshopDL"]["DepsBehavior"] = self.cmb_deps_behavior.currentData()
+        self.cfg["WorkshopDL"]["BatchSize"]    = str(self.spn_batch.value())
         save_config(self.cfg)
         QMessageBox.information(self, t("app_title"), t("msg_settings_saved"))
 
@@ -862,9 +1222,109 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Файл локализации", "", "JSON (*.json)")
         if path: self.inp_lang.setText(path)
 
-    def _apply_language(self):
+    # ── GitHub языки ──────────────────────────────────────────────────────────
+    def _populate_lang_combo_local(self):
+        """Заполняет комбо из локально доступных языков."""
+        self.cmb_lang.blockSignals(True)
+        self.cmb_lang.clear()
+        saved_code = cfg_get(self.cfg, "WorkshopDL", "LangCode", "en")
+        select_idx = 0
+        for i, (code, name, path) in enumerate(lang_list_local()):
+            self.cmb_lang.addItem(name, userData=(code, path, True))
+            if code == saved_code:
+                select_idx = i
+        self.cmb_lang.blockSignals(False)
+        if self.cmb_lang.count():
+            self.cmb_lang.setCurrentIndex(select_idx)
+
+    def _fetch_lang_list(self):
+        """Запрашивает список языков с GitHub."""
+        self.btn_lang_refresh.setEnabled(False)
+        self.lbl_lang_status.setText("  ⟳ Загружаю список с GitHub...")
+        self.lbl_lang_status.setStyleSheet("color: #888;")
+        self._lang_fetch_worker = LangFetchWorker()
+        self._lang_fetch_worker.list_ready.connect(self._on_lang_list_ready)
+        self._lang_fetch_worker.start()
+
+    def _on_lang_list_ready(self, remote_list):
+        self.btn_lang_refresh.setEnabled(True)
+        if not remote_list:
+            self.lbl_lang_status.setText("  ⚠  Нет соединения с GitHub")
+            self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
+            return
+
+        saved_code = cfg_get(self.cfg, "WorkshopDL", "LangCode", "en")
+        self.cmb_lang.blockSignals(True)
+        self.cmb_lang.clear()
+        select_idx = 0
+        for i, (code, name, is_local) in enumerate(remote_list):
+            # Ищем локальный путь если файл уже скачан
+            local_path = lang_local_path(code)
+            # Также проверяем рядом со скриптом (lang_XX.json)
+            bundled = os.path.join(APP_DIR, f"lang_{code}.json")
+            if os.path.exists(bundled):
+                local_path = bundled
+                is_local = True
+            label = f"{name}  {'✅' if is_local else '☁'}"
+            self.cmb_lang.addItem(label, userData=(code, local_path if is_local else "", is_local))
+            if code == saved_code:
+                select_idx = i
+        self.cmb_lang.blockSignals(False)
+        if self.cmb_lang.count():
+            self.cmb_lang.setCurrentIndex(select_idx)
+
+        downloaded = sum(1 for _, _, loc in remote_list if loc)
+        total = len(remote_list)
+        self.lbl_lang_status.setText(
+            f"  ✅ {total} языков на GitHub  |  {downloaded} скачано локально  "
+            f"|  ✅ = есть  ☁ = нажмите ⬇ Скачать"
+        )
+        self.lbl_lang_status.setStyleSheet("color: #27ae60;")
+
+    def _download_selected_lang(self):
+        idx = self.cmb_lang.currentIndex()
+        if idx < 0: return
+        code, local_path, is_local = self.cmb_lang.itemData(idx)
+        if is_local and local_path and os.path.exists(local_path):
+            self.lbl_lang_status.setText(f"  ✅ Язык уже скачан: {local_path}")
+            return
+        self.btn_lang_dl.setEnabled(False)
+        self._lang_dl_worker = LangFetchWorker(download_code=code)
+        self._lang_dl_worker.dl_progress.connect(self.lbl_lang_status.setText)
+        self._lang_dl_worker.dl_done.connect(self._on_lang_downloaded)
+        self._lang_dl_worker.start()
+
+    def _on_lang_downloaded(self, success, path_or_err):
+        self.btn_lang_dl.setEnabled(True)
+        if success:
+            self.lbl_lang_status.setText(f"  ✅ Скачано: {path_or_err}")
+            self.lbl_lang_status.setStyleSheet("color: #27ae60;")
+            # Обновляем комбо
+            self._fetch_lang_list()
+        else:
+            self.lbl_lang_status.setText(f"  ❌ Ошибка: {path_or_err}")
+            self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
+
+    def _apply_lang_from_combo(self):
+        """Применяет язык выбранный в комбо."""
+        idx = self.cmb_lang.currentIndex()
+        if idx < 0: return
+        code, local_path, is_local = self.cmb_lang.itemData(idx)
+        if not is_local or not local_path or not os.path.exists(local_path):
+            self.lbl_lang_status.setText("  ⚠  Сначала скачайте язык (кнопка ⬇ Скачать)")
+            self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
+            return
+        # Сохраняем код языка в конфиг
+        if "WorkshopDL" not in self.cfg: self.cfg["WorkshopDL"] = {}
+        self.cfg["WorkshopDL"]["LangCode"] = code
+        self.cfg["WorkshopDL"]["LangPath"] = local_path
+        save_config(self.cfg)
+        self.inp_lang.setText(local_path)
+        self._apply_language(path_override=local_path)
+
+    def _apply_language(self, path_override: str = ""):
         """Применяет язык немедленно — пересоздаёт весь UI."""
-        path = self.inp_lang.text().strip()
+        path = path_override or self.inp_lang.text().strip()
         if path and not os.path.exists(path):
             QMessageBox.warning(self, t("app_title"),
                 f"Файл не найден:\n{path}"); return
@@ -872,17 +1332,16 @@ class MainWindow(QMainWindow):
         # Сохраняем важные значения до пересоздания UI
         game_id   = self.inp_game.text()
         steamcmd  = self.inp_steamcmd.text()
-        lang_path = self.inp_lang.text().strip()
+        lang_path = path
         anon      = self.chk_anon.isChecked()
         user      = self.inp_user.text()
         pwd       = self.inp_pass.text()
-        upd_paths = mod_paths_load()
         upd_cur   = self.cmb_update_paths.currentText()
+        lang_code = cfg_get(self.cfg, "WorkshopDL", "LangCode", "en")
 
         # Сохраняем путь к языку в конфиг
         if lang_path:
-            for s in ("WorkshopDL",):
-                if s not in self.cfg: self.cfg[s] = {}
+            if "WorkshopDL" not in self.cfg: self.cfg["WorkshopDL"] = {}
             self.cfg["WorkshopDL"]["LangPath"] = lang_path
             save_config(self.cfg)
 
@@ -911,6 +1370,7 @@ class MainWindow(QMainWindow):
         self._toggle_anon()
         self._refresh_history()
         self._refresh_steamcmd_status()
+        self._populate_lang_combo_local()
         self.tabs.setCurrentIndex(old_tab)
         self.setWindowTitle(t("app_title"))
 
@@ -959,6 +1419,38 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_steamcmd_dl.setText(t("steamcmd_dl_error", err=path_or_err))
             self.lbl_steamcmd_dl.setStyleSheet("color: #e74c3c;")
+
+    def _clear_steamcmd_cache(self):
+        """Удаляет userdata/ и steamapps/ внутри папки steamcmd."""
+        steamcmd_dir = os.path.dirname(self._get_steamcmd())
+        targets = [
+            os.path.join(steamcmd_dir, "userdata"),
+            os.path.join(steamcmd_dir, "steamapps"),
+        ]
+        existing = [p for p in targets if os.path.exists(p)]
+        if not existing:
+            self.lbl_cache_status.setText("✅ Кеш уже чистый")
+            self.lbl_cache_status.setStyleSheet("color: #27ae60;")
+            return
+        reply = QMessageBox.question(
+            self, "Очистка кеша SteamCMD",
+            "Будут удалены:\n" + "\n".join(f"  • {p}" for p in existing) +
+            "\n\nПродолжить?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes: return
+        errors = []
+        for p in existing:
+            try:
+                shutil.rmtree(p)
+            except Exception as e:
+                errors.append(str(e))
+        if errors:
+            self.lbl_cache_status.setText(f"⚠ Ошибка: {errors[0]}")
+            self.lbl_cache_status.setStyleSheet("color: #e74c3c;")
+        else:
+            self.lbl_cache_status.setText("✅ Кеш очищен")
+            self.lbl_cache_status.setStyleSheet("color: #27ae60;")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
     def _extract_id(self, text):
@@ -1104,10 +1596,13 @@ class MainWindow(QMainWindow):
                   + (t("log_resume", n=resume_from+1) if resume_from else ""))
         self.btn_download.setEnabled(False); self.btn_pause.setEnabled(True); self.btn_cancel.setEnabled(True)
         history_add(game_id); self._refresh_history()
-        self.worker = DownloadWorker(steamcmd, game_id, mod_ids, anon, user, pwd, start_from=resume_from)
+        batch_size = int(cfg_get(self.cfg, "WorkshopDL", "BatchSize", "1"))
+        self.worker = DownloadWorker(steamcmd, game_id, mod_ids, anon, user, pwd,
+                                     start_from=resume_from, batch_size=batch_size)
         self.worker.log_line.connect(self._log)
         self.worker.progress.connect(lambda cur, tot: self.progress_bar.setValue(cur))
         self.worker.finished.connect(self._on_finished)
+        self.worker.deps_found.connect(self._on_deps_found)
         self.worker.paused.connect(self._on_paused)
         self.worker.start()
 
@@ -1182,10 +1677,11 @@ class MainWindow(QMainWindow):
         self.upd_worker.progress.connect(lambda c, m: (self.upd_progress.setMaximum(m), self.upd_progress.setValue(c)))
         self.upd_worker.mod_result.connect(self._on_upd_result)
         self.upd_worker.finished.connect(self._on_upd_finished)
+        self.upd_worker.missing_deps.connect(self._on_missing_deps_found)
         self.upd_worker.start()
 
     # ── Проверка обновлений: результат ────────────────────────────────────────
-    def _on_upd_result(self, mod_id, title, local_ts, server_ts, status, folder, size_mb):
+    def _on_upd_result(self, mod_id, title, local_ts, server_ts, status, folder, size_mb, mod_missing):
         local_dt  = datetime.datetime.fromtimestamp(local_ts).strftime("%Y-%m-%d %H:%M") if local_ts else "—"
         server_dt = datetime.datetime.fromtimestamp(server_ts).strftime("%Y-%m-%d %H:%M") if server_ts else "—"
 
@@ -1208,13 +1704,21 @@ class MainWindow(QMainWindow):
             if sort_val is not None: it.setData(Qt.UserRole, sort_val)
             return it
 
-        # 0: статус
-        st_item = cell(ICON[status], SORT[status])
-        st_item.setToolTip(t(f"status_{status}"))
+        # 0: статус — если есть незагруженные зависимости добавляем ⚠
+        has_missing = bool(mod_missing)
+        status_icon = ICON[status] + (" ⚠" if has_missing else "")
+        st_item = cell(status_icon, SORT[status])
+        tip = t(f"status_{status}")
+        if has_missing:
+            deps_text = "\n".join(f"  • {mid}: {name}" for mid, name in mod_missing)
+            tip += f"\n\n⚠ Отсутствующие зависимости ({len(mod_missing)}):\n{deps_text}"
+        st_item.setToolTip(tip)
         # 1: название
         name_item = QTableWidgetItem(title if title != mod_id else "—")
         name_item.setBackground(QBrush(row_color))
         name_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        if has_missing:
+            name_item.setToolTip(f"⚠ {len(mod_missing)} зависимост(ей) не скачаны")
         # 2: размер
         size_str = f"{size_mb:.1f} MB" if size_mb >= 1 else f"{size_mb*1024:.0f} KB"
         sz_item = cell(size_str, size_mb)
@@ -1226,7 +1730,7 @@ class MainWindow(QMainWindow):
         toggle_label = "▶ Включить" if status == "disabled" else "⏸ Выкл"
         tog_item = cell(toggle_label, mod_id)
         tog_item.setForeground(QBrush(QColor("#2980b9")))
-        tog_item.setData(Qt.UserRole + 1, folder)  # folder path
+        tog_item.setData(Qt.UserRole + 1, folder)
         # 5: папка
         folder_item = cell("📁", mod_id)
         folder_item.setForeground(QBrush(QColor("#27ae60")))
@@ -1249,7 +1753,7 @@ class MainWindow(QMainWindow):
         self.upd_table.sortByColumn(0, Qt.AscendingOrder)
         self.btn_check_upd.setEnabled(True)
         disabled = sum(1 for r in range(self.upd_table.rowCount())
-                       if self.upd_table.item(r, 0) and self.upd_table.item(r, 0).text() == "🔘")
+                       if self.upd_table.item(r, 0) and self.upd_table.item(r, 0).text().startswith("🔘"))
         has_outdated = bool(self._outdated_ids)
         self.btn_update_all.setEnabled(has_outdated)
         self.btn_update_sel.setEnabled(has_outdated)
@@ -1260,6 +1764,61 @@ class MainWindow(QMainWindow):
             t("upd_status_template", total=total, outdated=outdated,
               ok=ok_count, disabled=disabled)
         )
+
+    def _on_missing_deps_found(self, deps: dict):
+        """Вызывается когда проверка обновлений нашла незагруженные зависимости."""
+        self._show_deps_dialog(deps, source="updates")
+
+    def _on_deps_found(self, deps: dict):
+        """Вызывается когда воркер скачки нашёл зависимости до старта."""
+        self._show_deps_dialog(deps, source="download")
+
+    def _show_deps_dialog(self, deps: dict, source: str):
+        """Показывает диалог с найденными зависимостями и предлагает скачать."""
+        if not deps: return
+
+        behavior = cfg_get(self.cfg, "WorkshopDL", "DepsBehavior", "ask")
+
+        # Молча скачиваем
+        if behavior == "auto":
+            self._add_deps_to_list(deps)
+            self._log(f"🔗 Авто: добавлено {len(deps)} зависимост(ей) → нажмите ⬇ Скачать")
+            return
+
+        # Молча пропускаем
+        if behavior == "skip":
+            self._log(f"🔗 Пропущено {len(deps)} зависимост(ей) (настройка: всегда пропускать)")
+            return
+
+        # Спрашиваем (behavior == "ask")
+        lines = "\n".join(f"  • {name}  (ID: {mid})" for mid, name in list(deps.items())[:20])
+        if len(deps) > 20:
+            lines += f"\n  ... и ещё {len(deps) - 20}"
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("🔗 Зависимости модов")
+        msg.setIcon(QMessageBox.Question)
+        msg.setText(
+            f"Найдено <b>{len(deps)}</b> зависимост(ей) которых нет локально:\n\n"
+            f"{lines}\n\n"
+            f"Скачать их?"
+        )
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.Yes)
+        if msg.exec_() == QMessageBox.Yes:
+            self._add_deps_to_list(deps)
+
+    def _add_deps_to_list(self, deps: dict):
+        """Добавляет зависимости в список и переключается на вкладку Download."""
+        existing = {self.mod_list.item(i).text() for i in range(self.mod_list.count())}
+        added = 0
+        for mid in deps:
+            if mid not in existing:
+                self.mod_list.addItem(mid)
+                added += 1
+        if added:
+            self.tabs.setCurrentIndex(0)
+            self._log(f"🔗 Добавлено {added} зависимост(ей) — нажмите ⬇ Скачать")
 
     # ── Клики по таблице ─────────────────────────────────────────────────────
     def _upd_table_clicked(self, row, col):
