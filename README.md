@@ -15,7 +15,7 @@ Inspired by the original [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL
 ---
 ## ⬇ Download screen
 <img src="screen/mods_downloader.png" width="600">
----
+
 ## 🔄 Mod Manager
 <img src="screen/mods_manager.png" width="600">
 ---
@@ -65,7 +65,13 @@ pip install PyQt5 requests
 ---
 
 ## 🚀 Quick Start
-0. Download .exe and start it )
+1. Download .exe and start it.
+2. Start WorkshopDL.exe
+3. Go to **Settings** → click **⬇ Download SteamCMD Automatically**
+4. Enter a Mod ID on the **Download** tab — Game ID will be detected automatically
+5. Click **⬇ Download**
+
+## 🔨 Quick Build
 1. Clone or download this repository
 2. Install dependencies (see above)
 3. Run:
