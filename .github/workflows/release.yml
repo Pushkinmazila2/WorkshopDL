@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "workshopdl.py"   # срабатывает только когда меняется основной скрипт
+      - "workshopdl.py"   # блок запуска
 
 permissions:
   contents: write
