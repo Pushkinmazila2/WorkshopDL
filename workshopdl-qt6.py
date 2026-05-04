@@ -488,11 +488,11 @@ class DownloadWorker(QThread):
         Запускает одну сессию steamcmd для списка модов.
         Возвращает {mod_id: True/False}.
         """
-        # if IS_LINUX:
-        #     args = ([self.steamcmd, "+force_install_dir", APP_DIR, "+login", "anonymous"] if self.anonymous
-        #         else [self.steamcmd, "+force_install_dir", APP_DIR, "+login", self.username, self.password])
-        # else:
-        args = ([self.steamcmd, "+login", "anonymous"] if self.anonymous
+        if IS_LINUX:
+            args = ([self.steamcmd, "+force_install_dir", APP_DIR, "+login", "anonymous"] if self.anonymous
+                else [self.steamcmd, "+force_install_dir", APP_DIR, "+login", self.username, self.password])
+        else:
+            args = ([self.steamcmd, "+login", "anonymous"] if self.anonymous
                 else [self.steamcmd, "+login", self.username, self.password])
 
         for mid in mod_ids:
