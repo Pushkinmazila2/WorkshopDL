@@ -65,7 +65,7 @@ Inspired by the original [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL
 
 ```
 Python 3.8+
-PyQt5
+PyQt5 or PyQt6
 requests
 ```
 
