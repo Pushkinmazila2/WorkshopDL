@@ -197,7 +197,7 @@ MIT — do whatever you want, attribution appreciated.
 
 ---
 ## 👷 Virustotal
-https://www.virustotal.com/gui/file/3ee0c7aa1ddbfac2496e6530652e8c71383e37b948b90d8722629c516f586b45/detection
+[https://www.virustotal.com/gui/file/3ee0c7aa1ddbfac2496e6530652e8c71383e37b948b90d8722629c516f586b45/detection](https://www.virustotal.com/gui/file/0af0377f5cf265ac62c91c152e11997b6d4d380731d7e02811665321878b0c33)
 
 <div align="center">
 Made with ☕ and PyQt5
