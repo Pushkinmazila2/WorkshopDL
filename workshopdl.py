@@ -1,5 +1,5 @@
 """
-WorkshopDL — Python Edition v3
+WorkshopDL — Python Edition v4
 Полный аналог WorkshopDL с улучшенным интерфейсом:
 - Система локализации (JSON-файлы)
 - Таблица модов с кнопками: Steam / Вкл-Выкл / Открыть папку
@@ -7,19 +7,26 @@ WorkshopDL — Python Edition v3
 - Скрываемые столбцы дат
 - Размер мода в таблице
 - Пауза / продолжение, история игр, автопоиск Game ID
+- [v4] Установка модов после скачивания
+  - Инструкции хранятся на GitHub (game_id.json)
+  - Два формата: Параметрический (declarative) и Гибридный (JSON + Python-плагин)
+  - Автопоиск папки игры, умное копирование/распаковка, работа с ini/json
+  - Диалог с вопросами к пользователю (text/select/checkbox)
+  - Лог статуса установки
 """
 
 import sys, os, re, json, subprocess, threading, configparser, datetime, shutil
-import zipfile, urllib.request
+import zipfile, urllib.request, importlib.util, glob, fnmatch
 import requests
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLineEdit, QListWidget, QListWidgetItem, QLabel,
     QTextEdit, QGroupBox, QCheckBox, QTabWidget, QMessageBox,
     QFileDialog, QProgressBar, QComboBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QSizePolicy, QAction, QToolBar, QSpinBox
+    QHeaderView, QAbstractItemView, QSizePolicy, QAction, QToolBar, QSpinBox,
+    QDialog, QDialogButtonBox, QScrollArea, QFrame
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl, pyqtSlot
 from PyQt5.QtGui import QFont, QColor, QBrush, QDesktopServices
 
 # ── Платформа ─────────────────────────────────────────────────────────────────
@@ -645,6 +652,11 @@ GITHUB_LANG_API  = f"https://api.github.com/repos/{GITHUB_REPO}/contents/lang"
 GITHUB_LANG_RAW  = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/lang"
 LANG_LOCAL_DIR   = os.path.join(MODULES_PATH, "lang")   # куда сохраняем скачанные языки
 
+# ── Установщик модов: GitHub ──────────────────────────────────────────────────
+GITHUB_INSTALL_API = f"https://api.github.com/repos/{GITHUB_REPO}/contents/install"
+GITHUB_INSTALL_RAW = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/install"
+INSTALL_LOCAL_DIR  = os.path.join(MODULES_PATH, "install")  # кеш инструкций
+
 # Человекочитаемые имена языков по коду файла
 LANG_DISPLAY = {
     "en": "🇬🇧 English",
@@ -739,7 +751,1600 @@ class LangFetchWorker(QThread):
             self.dl_done.emit(False, str(e))
 
 
-# ── Главное окно ──────────────────────────────────────────────────────────────
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# МОД-УСТАНОВЩИК  (v4)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Получение инструкции с GitHub ─────────────────────────────────────────────
+
+def install_fetch_recipe(game_id: str, force: bool = False) -> dict | None:
+    """
+    Скачивает/возвращает из кеша инструкцию установки для игры.
+    Формат файла: install/<game_id>.json
+    Возвращает dict или None если инструкции нет.
+    """
+    os.makedirs(INSTALL_LOCAL_DIR, exist_ok=True)
+    local = os.path.join(INSTALL_LOCAL_DIR, f"{game_id}.json")
+    if os.path.exists(local) and not force:
+        try:
+            with open(local, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    url = f"{GITHUB_INSTALL_RAW}/{game_id}.json"
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        data = r.json()
+        with open(local, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return data
+    except Exception:
+        return None
+
+
+# ── Параметрические утилиты-функции (строительные блоки декларативного DSL) ──
+
+def _pf_find_game_folder(params: dict, ctx: dict) -> str | None:
+    """
+    Параметрическая функция автоматического поиска папки игры.
+    params:
+      candidates  — список возможных путей (поддерживает {STEAM}, {USERPROFILE}, glob-паттерны)
+      registry    — список ключей реестра Windows (только Windows)
+      env_hints   — список переменных окружения
+    Возвращает найденный путь или None.
+    """
+    tpl_vars = {
+        "STEAM":        _find_steam_path(),
+        "USERPROFILE":  os.path.expanduser("~"),
+        "APPDATA":      os.environ.get("APPDATA", ""),
+        "LOCALAPPDATA": os.environ.get("LOCALAPPDATA", ""),
+        "PROGRAMFILES": os.environ.get("ProgramFiles", "C:\\Program Files"),
+        "PROGRAMFILES86": os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+    }
+    tpl_vars.update(ctx.get("user_vars", {}))
+
+    candidates = params.get("candidates", [])
+    for pattern in candidates:
+        try:
+            expanded = pattern.format(**tpl_vars)
+        except KeyError:
+            expanded = pattern
+        # glob
+        matches = glob.glob(expanded, recursive=True)
+        if matches:
+            return matches[0]
+        # прямой путь
+        if os.path.isdir(expanded):
+            return expanded
+
+    # Реестр Windows
+    if IS_WIN and params.get("registry"):
+        import winreg
+        for reg_path in params["registry"]:
+            try:
+                parts = reg_path.split("\\")
+                root_map = {
+                    "HKEY_LOCAL_MACHINE": winreg.HKEY_LOCAL_MACHINE,
+                    "HKEY_CURRENT_USER":  winreg.HKEY_CURRENT_USER,
+                }
+                root = root_map.get(parts[0], winreg.HKEY_LOCAL_MACHINE)
+                key_path = "\\".join(parts[1:-1])
+                value_name = parts[-1]
+                with winreg.OpenKey(root, key_path) as k:
+                    val, _ = winreg.QueryValueEx(k, value_name)
+                    if os.path.isdir(str(val)):
+                        return str(val)
+            except Exception:
+                pass
+
+    # Переменные окружения
+    for env in params.get("env_hints", []):
+        val = os.environ.get(env, "")
+        if val and os.path.isdir(val):
+            return val
+
+    return None
+
+
+def _find_steam_path() -> str:
+    """Находит корень Steam на текущей платформе."""
+    if IS_WIN:
+        candidates = [
+            os.path.expandvars(r"%ProgramFiles(x86)%\Steam"),
+            os.path.expandvars(r"%ProgramFiles%\Steam"),
+            r"C:\Steam",
+        ]
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"SOFTWARE\WOW6432Node\Valve\Steam") as k:
+                val, _ = winreg.QueryValueEx(k, "InstallPath")
+                candidates.insert(0, str(val))
+        except Exception:
+            pass
+    elif IS_MAC:
+        candidates = [os.path.expanduser("~/Library/Application Support/Steam")]
+    else:
+        candidates = [
+            os.path.expanduser("~/.steam/steam"),
+            os.path.expanduser("~/.local/share/Steam"),
+        ]
+    for p in candidates:
+        if os.path.isdir(p):
+            return p
+    return ""
+
+
+# ── Параметрическая функция: определение магазина и версии игры ───────────────
+#
+# Ключевая идея: мы не знаем откуда игра — пользователь сам указал папку
+# (через вопрос GAME_PATH или find_game_folder). Детектируем только по
+# файлам внутри этой папки. Никакого реестра, никаких путей.
+#
+GameStoreResult = dict  # {store, version, evidence, game_folder}
+
+
+# Известные файлы-маркеры версии для каждого магазина.
+# Структура: list of {file, format, extract, label}
+# Используется _auto_detect_version и может быть переопределена в инструкции.
+_STORE_VERSION_READERS = {
+    "gog": [
+        {
+            # goggame-<id>.info — главный манифест GOG
+            "file":    "goggame-*.info",
+            "format":  "json",
+            "extract": {"path": "version"},
+            "label":   "GOG манифест (version)",
+        },
+        {
+            "file":    "goggame-*.info",
+            "format":  "json",
+            "extract": {"path": "gameId"},
+            "label":   "GOG манифест (gameId)",
+        },
+        {
+            # GOG Galaxy 2.0: gameinfo файл
+            "file":    "gameinfo",
+            "format":  "text",
+            "extract": {"line": 2},   # 3-я строка = версия
+            "label":   "GOG gameinfo (строка 2)",
+        },
+    ],
+    "epic": [
+        {
+            # Epic manifest внутри папки игры
+            "file":    ".egstore/*.item",
+            "format":  "json",
+            "extract": {"path": "AppVersionString"},
+            "label":   "Epic .egstore manifest (AppVersionString)",
+        },
+        {
+            "file":    ".egstore/*.item",
+            "format":  "json",
+            "extract": {"path": "BuildVersion"},
+            "label":   "Epic .egstore manifest (BuildVersion)",
+        },
+    ],
+    "steam": [
+        {
+            # steam_appid.txt — только app id, не версия игры
+            # Версия через .acf манифест в steamapps/ (уровень выше)
+            "file":    "../*.acf",
+            "format":  "text",
+            "extract": {"regex": r'"buildid"\s+"(\d+)"'},
+            "label":   "Steam .acf buildid",
+            "transform": "strip",
+        },
+    ],
+    # Универсальные файлы версии — пробуем для любого магазина
+    "_universal": [
+        {
+            "file":    "version.txt",
+            "format":  "text",
+            "extract": {"regex": r"(\d+[\.\d]+)"},
+            "label":   "version.txt",
+        },
+        {
+            "file":    "Version.txt",
+            "format":  "text",
+            "extract": {"regex": r"(\d+[\.\d]+)"},
+            "label":   "Version.txt",
+        },
+        {
+            "file":    "version.json",
+            "format":  "json",
+            "extract": {"path": "version"},
+            "label":   "version.json (.version)",
+        },
+        {
+            "file":    "version.json",
+            "format":  "json",
+            "extract": {"path": "Version"},
+            "label":   "version.json (.Version)",
+        },
+        {
+            "file":    "app.info",
+            "format":  "json",
+            "extract": {"path": "version"},
+            "label":   "app.info (.version)",
+        },
+    ],
+}
+
+# Файлы-маркеры принадлежности к магазину (только уникальные, не Steam)
+_STORE_SIGNATURE_FILES = {
+    "gog": [
+        "goggame-*.info",   # почти всегда есть
+        "goggame-*.id",
+        "GalaxyAPI.dll",
+        "Galaxy64.dll",
+        "goggame.ico",
+        "gog.ico",
+        "gameinfo",         # GOG gameinfo без расширения
+        "GalaxyCSharpGlue*.dll",
+    ],
+    "epic": [
+        ".egstore",                         # папка
+        "EOSSDK-Win64-Shipping.dll",
+        "EOSSDK-Win32-Shipping.dll",
+        "libEOSSDK-Linux-Shipping.so",
+    ],
+}
+
+
+def _pf_detect_game_store(game_folder: str, params: dict, ctx: dict) -> GameStoreResult:
+    """
+    Определяет магазин и версию игры исключительно по файлам в папке игры.
+
+    Пользователь сам указал папку (через вопрос GAME_PATH или find_game_folder).
+    Реестр и пути не используются — работает одинаково на Win/Linux/macOS.
+
+    Порядок:
+      1. force_store в params — принудительный результат из инструкции
+      2. Сканируем файлы-маркеры магазина (_STORE_SIGNATURE_FILES)
+      3. Пробуем прочитать версию через _STORE_VERSION_READERS
+         сначала для определённого магазина, потом _universal
+      4. Дополнительные readers из params["version_readers"] (кастомные)
+
+    params:
+      force_store      — "steam"|"gog"|"epic"|"other" — не детектировать, взять как есть
+      hints            — {store: ["file.dll", ...]} — доп. маркеры из инструкции
+      version_readers  — список дополнительных readers (тот же формат что _STORE_VERSION_READERS)
+      version_file     — краткая форма: один reader (совместимость со старым форматом)
+    """
+    if not game_folder or not os.path.isdir(game_folder):
+        return {
+            "store": "unknown", "version": "",
+            "evidence": ["папка игры не найдена или не существует"],
+            "game_folder": game_folder,
+        }
+
+    # ── 0. force_store ────────────────────────────────────────────────────────
+    if params.get("force_store"):
+        forced  = params["force_store"]
+        version = _auto_detect_version(game_folder, forced, params, ctx)
+        return {
+            "store": forced, "version": version,
+            "evidence": [f"force_store={forced} задан в инструкции"],
+            "game_folder": game_folder,
+        }
+
+    evidence: list[str] = []
+    votes = {"gog": 0, "epic": 0, "steam": 0}
+
+    try:
+        dir_listing = os.listdir(game_folder)
+    except Exception:
+        dir_listing = []
+    dir_set = set(dir_listing)
+
+    # ── 1. Маркеры магазина по файлам ────────────────────────────────────────
+    sig_files = dict(_STORE_SIGNATURE_FILES)
+    # Доп. маркеры из инструкции
+    for st, files in params.get("hints", {}).items():
+        sig_files.setdefault(st, []).extend(files)
+
+    for st, patterns in sig_files.items():
+        for pattern in patterns:
+            # Папка (.egstore)
+            if not pattern.endswith(("*", ".dll", ".so", ".ico", ".info", ".id")):
+                if os.path.isdir(os.path.join(game_folder, pattern)):
+                    votes[st] = votes.get(st, 0) + 5
+                    evidence.append(f"папка {pattern}/")
+                continue
+            # Glob
+            if "*" in pattern:
+                matches = glob.glob(os.path.join(game_folder, pattern))
+                if matches:
+                    votes[st] = votes.get(st, 0) + 5
+                    evidence.append(f"файл {os.path.basename(matches[0])}")
+            else:
+                if pattern in dir_set:
+                    votes[st] = votes.get(st, 0) + 4
+                    evidence.append(f"файл {pattern}")
+
+    # ── 2. Голосование ───────────────────────────────────────────────────────
+    detected = max(votes, key=votes.get) if any(v > 0 for v in votes.values()) else "other"
+
+    # ── 3. Версия ─────────────────────────────────────────────────────────────
+    version = _auto_detect_version(game_folder, detected, params, ctx)
+
+    return {
+        "store":       detected,
+        "version":     version,
+        "evidence":    evidence,
+        "game_folder": game_folder,
+        "votes":       votes,
+    }
+
+
+def _auto_detect_version(game_folder: str, store: str, params: dict = None, ctx: dict = None) -> str:
+    """
+    Пробует все известные способы прочитать версию игры из файлов в папке игры.
+    Порядок: readers для конкретного store → _universal → params["version_readers"] → params["version_file"].
+    """
+    ctx    = ctx    or {}
+    params = params or {}
+
+    # Собираем список readers в порядке приоритета
+    readers = []
+    readers += _STORE_VERSION_READERS.get(store, [])
+    readers += _STORE_VERSION_READERS["_universal"]
+    readers += params.get("version_readers", [])
+
+    for reader in readers:
+        val = _pf_read_file_value(game_folder, reader, ctx)
+        if val and val.strip():
+            return val.strip()
+
+    # Краткая форма version_file (обратная совместимость)
+    if params.get("version_file"):
+        val = _pf_read_file_value(game_folder, params["version_file"], ctx)
+        if val:
+            return val.strip()
+
+    return ""
+
+
+
+    """
+    Параметрическая функция определения магазина/источника игры.
+
+    ВАЖНО: WorkshopDL скачивает моды только через SteamCMD — все скачанные
+    моды лежат в steamapps/workshop/content/<game_id>/<mod_id>/.
+    Поэтому store=steam устанавливается автоматически через контекст ещё до
+    вызова этой функции (_step_detect_store проверяет ctx["workshopdl_source"]).
+
+    Эта функция нужна для определения того, КАК УСТАНОВЛЕНА САМА ИГРА —
+    чтобы найти правильную папку назначения для мода:
+      - Steam → steamapps/common/<Game>/
+      - GOG   → обычно C:/GOG Games/<Game>/  или ~/.local/share/...
+      - Epic  → C:/Program Files/Epic Games/<Game>/
+      - other → пользователь указывает вручную
+
+    Детектирование по приоритету:
+      1. ctx["game_folder"] содержит steamapps/common → steam (надёжно)
+      2. Маркер-файлы в папке игры (GOG/Epic специфичны, Steam маркеры могут
+         быть в любом релизе — учитываем с меньшим весом)
+      3. Характерные подпапки/.egstore/goggame-*.info
+      4. Путь к папке (GOG Games, Epic Games в пути)
+      5. Реестр Windows — ТОЛЬКО для GOG и Epic (Steam уже определён через путь)
+      6. Linux/macOS: характерные пути GOG/Heroic/Lutris вместо реестра
+
+    params (все опциональны):
+      hints         — {store: ["marker.dll", ...]} — дополнительные маркеры
+      version_file  — передаётся в _pf_read_file_value
+      force_store   — принудительно задать результат ("steam"/"gog"/"epic"/"other")
+
+    Возвращает GameStoreResult:
+      store, version, evidence, game_folder
+    """
+    evidence: list[str] = []
+    votes = {"steam": 0, "gog": 0, "epic": 0}
+
+    def vote(count: int, msg: str, st: str):
+        evidence.append(msg)
+        votes[st] += count
+
+    # ── 0. Принудительное задание магазина из инструкции ──────────────────────
+    if params.get("force_store"):
+        forced = params["force_store"]
+        evidence.append(f"force_store={forced} (задан в инструкции)")
+        version = _pf_read_file_value(game_folder, params["version_file"], ctx) \
+                  if params.get("version_file") else _auto_detect_version(game_folder, forced)
+        return {"store": forced, "version": version, "evidence": evidence, "game_folder": game_folder}
+
+    if not game_folder or not os.path.isdir(game_folder):
+        return {"store": "unknown", "version": "", "evidence": ["папка игры не найдена"], "game_folder": game_folder}
+
+    norm_path = game_folder.replace("\\", "/").lower()
+
+    # ── 1. Путь содержит steamapps/common → это Steam, сразу высокий вес ────────
+    # WorkshopDL работает со Steam, и если game_folder уже указывает на
+    # steamapps/common/<Game> — это 100% Steam без дальнейших проверок
+    if "steamapps/common" in norm_path:
+        vote(10, "путь содержит steamapps/common", "steam")
+
+    # ── 2. Маркер-файлы ───────────────────────────────────────────────────────
+    # Steam маркеры дают малый вес — steam_api.dll есть у многих пираток тоже.
+    # GOG/Epic маркеры уникальны → высокий вес.
+    MARKERS = {
+        "steam": [
+            ("steam_api.dll",        2), ("steam_api64.dll",     2),
+            ("libsteam_api.so",      2), ("libsteam_api.dylib",  2),
+            ("steam_appid.txt",      3),  # почти всегда Steam
+            ("installscript.vdf",    2),
+        ],
+        "gog": [
+            ("GalaxyAPI.dll",        5), ("Galaxy64.dll",        5),
+            ("goggame.ico",          4), ("gog.ico",             4),
+            ("Galaxy.dll",           4),
+        ],
+        "epic": [
+            ("EOSSDK-Win64-Shipping.dll",   5),
+            ("EOSSDK-Win32-Shipping.dll",   5),
+            ("libEOSSDK-Linux-Shipping.so", 5),
+        ],
+    }
+    # Дополнительные маркеры из инструкции
+    for st_hint, files in params.get("hints", {}).items():
+        for f in files:
+            MARKERS.setdefault(st_hint, []).append((f, 4))
+
+    try:
+        dir_files = set(os.listdir(game_folder))
+    except Exception:
+        dir_files = set()
+
+    for st, marker_list in MARKERS.items():
+        for marker, weight in marker_list:
+            if marker in dir_files:
+                vote(weight, f"файл {marker}", st)
+
+    # GOG: динамические goggame-<id>.info / .id
+    for fname in dir_files:
+        if fname.startswith("goggame-"):
+            if fname.endswith(".info"):
+                vote(5, f"файл {fname} (GOG manifest)", "gog")
+            elif fname.endswith(".id"):
+                vote(3, f"файл {fname} (GOG id)", "gog")
+        if fname.startswith("GalaxyCSharpGlue"):
+            vote(4, f"файл {fname}", "gog")
+
+    # ── 3. Характерные подпапки и служебные файлы ─────────────────────────────
+    if os.path.isdir(os.path.join(game_folder, ".egstore")):
+        vote(6, ".egstore/ (Epic manifest dir)", "epic")
+        egstore = os.path.join(game_folder, ".egstore")
+        for fname in os.listdir(egstore):
+            if fname.endswith(".mancpn"):
+                vote(3, f".egstore/{fname}", "epic")
+            elif fname.endswith(".item"):
+                vote(4, f".egstore/{fname}", "epic")
+
+    if os.path.isdir(os.path.join(game_folder, "__galaxy")):
+        vote(5, "__galaxy/ (GOG overlay)", "gog")
+
+    # ── 4. Путь к папке (GOG / Epic — характерные корни) ─────────────────────
+    # Не даём вес Steam через путь — уже учли в п.1
+    if "/gog games/" in norm_path or "\\gog games\\" in game_folder.lower():
+        vote(4, "путь содержит 'GOG Games'", "gog")
+    if "epic games" in norm_path:
+        vote(4, "путь содержит 'Epic Games'", "epic")
+
+    # Heroic Games Launcher (Linux/macOS) устанавливает GOG/Epic игры
+    if "heroic/gog_games" in norm_path or "heroic\\gog_games" in norm_path:
+        vote(6, "путь Heroic GOG", "gog")
+    if "heroic/games" in norm_path or "heroic\\games" in norm_path:
+        vote(4, "путь Heroic Epic", "epic")
+
+    # Lutris (Linux) — может быть что угодно, маленький вес
+    if "/lutris/" in norm_path:
+        vote(1, "путь содержит lutris (неопределённый магазин)", "other")
+
+    # ── 5а. Реестр Windows — только GOG и Epic (Steam уже ясен через путь) ────
+    if IS_WIN:
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"SOFTWARE\WOW6432Node\GOG.com\Games") as k:
+                # Проверяем что именно эта игра зарегистрирована
+                n = winreg.QueryInfoKey(k)[0]
+                for i in range(n):
+                    try:
+                        sub_name = winreg.EnumKey(k, i)
+                        with winreg.OpenKey(k, sub_name) as sub:
+                            try:
+                                path_val, _ = winreg.QueryValueEx(sub, "PATH")
+                                if path_val and os.path.normcase(path_val) == os.path.normcase(game_folder):
+                                    vote(8, f"реестр GOG: {sub_name} PATH совпадает", "gog")
+                            except Exception:
+                                pass
+                    except Exception:
+                        break
+        except Exception:
+            pass
+
+        try:
+            import winreg
+            # Epic: ищем в ProgramData/Epic/EpicGamesLauncher/Data/Manifests
+            manifests_dir = os.path.join(
+                os.environ.get("PROGRAMDATA", "C:\\ProgramData"),
+                "Epic", "EpicGamesLauncher", "Data", "Manifests"
+            )
+            if os.path.isdir(manifests_dir):
+                for fname in os.listdir(manifests_dir):
+                    if fname.endswith(".item"):
+                        try:
+                            with open(os.path.join(manifests_dir, fname), encoding="utf-8") as f:
+                                data = json.load(f)
+                            install_loc = data.get("InstallLocation", "")
+                            if install_loc and os.path.normcase(install_loc) == os.path.normcase(game_folder):
+                                vote(8, f"Epic манифест: {fname}", "epic")
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    # ── 5б. Linux/macOS: характерные пути без реестра ─────────────────────────
+    else:
+        # GOG через Minigalaxy или ручную установку
+        home = os.path.expanduser("~")
+        gog_linux_roots = [
+            os.path.join(home, "GOG Games"),
+            os.path.join(home, "gog"),
+            "/opt/GOG Games",
+        ]
+        for root in gog_linux_roots:
+            if norm_path.startswith(root.lower().replace("\\", "/")):
+                vote(5, f"Linux GOG root: {root}", "gog")
+
+        # Epic через Heroic — manifest файлы
+        heroic_gog_manifest = os.path.join(
+            home, ".config", "heroic", "gog_store", "installed.json"
+        )
+        heroic_epic_manifest = os.path.join(
+            home, ".config", "heroic", "store", "installed.json"
+        )
+        for manifest_path, st in [(heroic_gog_manifest, "gog"), (heroic_epic_manifest, "epic")]:
+            if os.path.isfile(manifest_path):
+                try:
+                    with open(manifest_path, encoding="utf-8") as f:
+                        installed = json.load(f)
+                    # Heroic хранит массив или dict
+                    items = installed if isinstance(installed, list) else installed.values()
+                    for item in items:
+                        if isinstance(item, dict):
+                            loc = item.get("install_path", "") or item.get("folder_name", "")
+                            if loc and os.path.normcase(loc) in norm_path:
+                                vote(7, f"Heroic manifest {st}: {os.path.basename(manifest_path)}", st)
+                except Exception:
+                    pass
+
+        # Bottles/Wine (Linux) — снижаем уверенность, не меняем store
+        if "/bottles/" in norm_path or "/.wine/" in norm_path:
+            evidence.append("⚠ Wine/Bottles окружение — определение магазина менее надёжно")
+
+    # ── 6. Финальный вердикт ──────────────────────────────────────────────────
+    best_store = max(votes, key=votes.get)
+    if votes[best_store] > 0:
+        store = best_store
+    else:
+        store = "other" if evidence else "unknown"
+
+    # ── 7. Версия ─────────────────────────────────────────────────────────────
+    version = ""
+    if params.get("version_file"):
+        version = _pf_read_file_value(game_folder, params["version_file"], ctx) or ""
+    if not version:
+        version = _auto_detect_version(game_folder, store)
+
+    return {
+        "store":       store,
+        "version":     version,
+        "evidence":    evidence,
+        "game_folder": game_folder,
+        "votes":       votes,   # для отладки
+    }
+
+
+def _auto_detect_version(game_folder: str, store: str) -> str:
+    """
+    Пытается автоматически найти версию игры по характерным файлам магазина.
+    Возвращает строку версии или "".
+    """
+    # Steam: steam_appid.txt содержит только appid, не версию.
+    # Версия может быть в buildmanifest
+    if store == "steam":
+        # Ищем .acf манифест на уровень выше (steamapps/)
+        parent = os.path.dirname(game_folder)
+        for fname in os.listdir(parent) if os.path.isdir(parent) else []:
+            if fname.endswith(".acf"):
+                acf_path = os.path.join(parent, fname)
+                try:
+                    content = open(acf_path, encoding="utf-8", errors="replace").read()
+                    m = re.search(r'"buildid"\s+"(\d+)"', content)
+                    if m:
+                        return f"build:{m.group(1)}"
+                except Exception:
+                    pass
+
+    # GOG: goggame-*.info содержит версию
+    if store == "gog":
+        for fname in os.listdir(game_folder):
+            if fname.startswith("goggame-") and fname.endswith(".info"):
+                try:
+                    with open(os.path.join(game_folder, fname), encoding="utf-8") as f:
+                        data = json.load(f)
+                    ver = data.get("gameId", "") or data.get("version", "")
+                    if ver:
+                        return str(ver)
+                except Exception:
+                    pass
+
+    # Epic: .egstore/*.item содержит AppVersionString
+    if store == "epic":
+        egstore = os.path.join(game_folder, ".egstore")
+        if os.path.isdir(egstore):
+            for fname in os.listdir(egstore):
+                if fname.endswith(".item"):
+                    try:
+                        with open(os.path.join(egstore, fname), encoding="utf-8") as f:
+                            data = json.load(f)
+                        ver = data.get("AppVersionString", "") or data.get("BuildVersion", "")
+                        if ver:
+                            return str(ver)
+                    except Exception:
+                        pass
+
+    return ""
+
+
+# ── Параметрическая функция: чтение значения из файла ─────────────────────────
+
+def _pf_read_file_value(base_folder: str, params: dict, ctx: dict) -> str | None:
+    """
+    Универсальная параметрическая функция чтения значения из файла.
+    Позволяет извлечь версию игры, путь, ключ конфига — что угодно.
+
+    params:
+      file      — путь к файлу (относительно base_folder или абсолютный)
+                  Поддерживает шаблоны: {game_folder}, {APPDATA} и т.д.
+                  Поддерживает glob: "*.info", "data/version_*.txt"
+      format    — формат файла: "text" | "json" | "ini" | "binary" | "auto"
+                  auto (default) — определяется по расширению
+      extract   — как извлечь значение:
+
+        Для format=text / binary:
+          regex       — регулярное выражение; возвращает group(1) если есть группа
+          line        — номер строки (0-based); -1 = последняя
+          strip       — bool, обрезать пробелы (default True)
+
+        Для format=json:
+          path        — точечная нотация: "version", "app.build.number"
+          regex       — применяется к строковому значению после извлечения
+
+        Для format=ini:
+          section     — имя секции (default DEFAULT)
+          key         — имя ключа
+          regex       — применяется к значению ключа
+
+        Для format=binary:
+          offset      — смещение в байтах (int или hex-строка "0x1C")
+          length      — количество байт для чтения
+          encoding    — кодировка строки ("utf-8", "utf-16-le", "ascii", default "utf-8")
+          regex       — применяется к декодированной строке
+
+      fallback  — значение если файл/ключ не найден
+      transform — "strip" | "lower" | "upper" | "split_first:<sep>" | "split_last:<sep>"
+                  преобразование результата перед возвратом
+
+    Возвращает строку или None (если не найдено и нет fallback).
+    """
+    tpl_vars = {
+        "game_folder":  ctx.get("game_folder", base_folder),
+        "mod_folder":   ctx.get("mod_folder", ""),
+        "APPDATA":      os.environ.get("APPDATA", ""),
+        "LOCALAPPDATA": os.environ.get("LOCALAPPDATA", ""),
+        "USERPROFILE":  os.path.expanduser("~"),
+        **ctx.get("user_vars", {}),
+    }
+    fallback = params.get("fallback")
+
+    # ── Разворачиваем путь ────────────────────────────────────────────────────
+    raw_file = params.get("file", "")
+    try:
+        raw_file = raw_file.format(**tpl_vars)
+    except KeyError:
+        pass
+
+    # Абсолютный или относительный
+    if not os.path.isabs(raw_file):
+        raw_file = os.path.join(base_folder, raw_file)
+
+    # Glob
+    matches = glob.glob(raw_file, recursive=True)
+    filepath = matches[0] if matches else raw_file
+
+    if not os.path.isfile(filepath):
+        return fallback
+
+    # ── Определяем формат ─────────────────────────────────────────────────────
+    fmt = params.get("format", "auto")
+    if fmt == "auto":
+        ext = os.path.splitext(filepath)[1].lower()
+        if ext in (".json",):                              fmt = "json"
+        elif ext in (".ini", ".cfg", ".conf", ".toml"):    fmt = "ini"
+        elif ext in (".exe", ".dll", ".bin", ".pak"):      fmt = "binary"
+        else:                                              fmt = "text"
+
+    extract = params.get("extract", {})
+    result  = None
+
+    # ── TEXT ──────────────────────────────────────────────────────────────────
+    if fmt == "text":
+        try:
+            enc  = extract.get("encoding", "utf-8")
+            text = open(filepath, encoding=enc, errors="replace").read()
+        except Exception:
+            return fallback
+
+        regex = extract.get("regex")
+        if regex:
+            m = re.search(regex, text, re.MULTILINE)
+            result = m.group(1) if m and m.lastindex else (m.group(0) if m else None)
+        else:
+            lines = text.splitlines()
+            line_no = extract.get("line", 0)
+            if lines:
+                result = lines[line_no] if abs(line_no) < len(lines) else lines[-1]
+            else:
+                result = text
+
+    # ── JSON ──────────────────────────────────────────────────────────────────
+    elif fmt == "json":
+        try:
+            with open(filepath, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return fallback
+
+        path_keys = extract.get("path", "").split(".")
+        node = data
+        for k in path_keys:
+            if not k:
+                continue
+            if isinstance(node, dict):
+                node = node.get(k)
+            elif isinstance(node, list):
+                try:
+                    node = node[int(k)]
+                except (ValueError, IndexError):
+                    node = None
+            else:
+                node = None
+            if node is None:
+                return fallback
+
+        result = str(node) if node is not None else None
+        regex = extract.get("regex")
+        if result and regex:
+            m = re.search(regex, result)
+            result = m.group(1) if m and m.lastindex else (m.group(0) if m else result)
+
+    # ── INI ───────────────────────────────────────────────────────────────────
+    elif fmt == "ini":
+        try:
+            cfg = configparser.ConfigParser(strict=False)
+            cfg.optionxform = str
+            cfg.read(filepath, encoding="utf-8")
+        except Exception:
+            return fallback
+
+        section = extract.get("section", "DEFAULT")
+        key     = extract.get("key", "")
+        try:
+            result = cfg.get(section, key)
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            return fallback
+
+        regex = extract.get("regex")
+        if result and regex:
+            m = re.search(regex, result)
+            result = m.group(1) if m and m.lastindex else (m.group(0) if m else result)
+
+    # ── BINARY ────────────────────────────────────────────────────────────────
+    elif fmt == "binary":
+        try:
+            offset_raw = extract.get("offset", 0)
+            offset = int(offset_raw, 16) if isinstance(offset_raw, str) and offset_raw.startswith("0x") \
+                     else int(offset_raw)
+            length   = int(extract.get("length", 256))
+            encoding = extract.get("encoding", "utf-8")
+
+            with open(filepath, "rb") as f:
+                f.seek(offset)
+                raw_bytes = f.read(length)
+
+            # Декодируем — обрезаем по нулевому байту
+            text = raw_bytes.split(b"\x00")[0].decode(encoding, errors="replace")
+            regex = extract.get("regex")
+            if regex:
+                m = re.search(regex, text)
+                result = m.group(1) if m and m.lastindex else (m.group(0) if m else None)
+            else:
+                result = text.strip()
+        except Exception:
+            return fallback
+
+    # ── Трансформация ─────────────────────────────────────────────────────────
+    if result is None:
+        return fallback
+    result = str(result)
+    if extract.get("strip", True):
+        result = result.strip()
+
+    transform = params.get("transform", "")
+    if transform == "strip":
+        result = result.strip()
+    elif transform == "lower":
+        result = result.lower()
+    elif transform == "upper":
+        result = result.upper()
+    elif transform.startswith("split_first:"):
+        sep = transform[12:] or "."
+        result = result.split(sep)[0]
+    elif transform.startswith("split_last:"):
+        sep = transform[11:] or "."
+        result = result.split(sep)[-1]
+
+    return result or fallback
+
+
+def _pf_smart_copy(src_root: str, dst_root: str, params: dict, log_cb) -> list[str]:
+    """
+    Функция умного копирования и распаковки (основной Action).
+    params:
+      files     — список {from, to, overwrite, extract}
+                  from: паттерн glob относительно src_root
+                  to:   путь относительно dst_root
+                  overwrite: bool (default True)
+                  extract: bool — распаковать архив (zip/7z)
+      flatten   — bool: игнорировать структуру папок при копировании
+    Возвращает список скопированных файлов.
+    """
+    copied = []
+    flatten = params.get("flatten", False)
+
+    for rule in params.get("files", []):
+        pattern  = rule.get("from", "**")
+        rel_dst  = rule.get("to", ".")
+        overwrite = rule.get("overwrite", True)
+        do_extract = rule.get("extract", False)
+
+        # Ищем файлы
+        full_pattern = os.path.join(src_root, pattern)
+        matches = glob.glob(full_pattern, recursive=True)
+        if not matches:
+            # Попробуем fnmatch
+            matches = [
+                os.path.join(dp, f)
+                for dp, _, files in os.walk(src_root)
+                for f in files
+                if fnmatch.fnmatch(f, os.path.basename(pattern))
+            ]
+
+        abs_dst = os.path.join(dst_root, rel_dst)
+        os.makedirs(abs_dst, exist_ok=True)
+
+        for src_file in matches:
+            if os.path.isdir(src_file):
+                continue
+            if flatten:
+                dst_file = os.path.join(abs_dst, os.path.basename(src_file))
+            else:
+                rel = os.path.relpath(src_file, src_root)
+                dst_file = os.path.join(abs_dst, rel)
+            os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+
+            if os.path.exists(dst_file) and not overwrite:
+                log_cb(f"  ⏭ пропуск (уже есть): {os.path.basename(dst_file)}")
+                continue
+
+            if do_extract and src_file.lower().endswith(".zip"):
+                log_cb(f"  📦 распаковка: {os.path.basename(src_file)} → {rel_dst}")
+                try:
+                    with zipfile.ZipFile(src_file, "r") as z:
+                        z.extractall(abs_dst)
+                    copied.append(abs_dst)
+                except Exception as e:
+                    log_cb(f"  ❌ ошибка распаковки: {e}")
+            else:
+                try:
+                    shutil.copy2(src_file, dst_file)
+                    copied.append(dst_file)
+                    log_cb(f"  ✅ скопировано: {os.path.relpath(dst_file, dst_root)}")
+                except Exception as e:
+                    log_cb(f"  ❌ ошибка копирования {os.path.basename(src_file)}: {e}")
+    return copied
+
+
+def _pf_safe_eval_condition(condition: str, ctx: dict) -> bool:
+    """
+    Функция безопасного вычисления условий (when).
+    Поддерживает:
+      file_exists:<path>
+      dir_exists:<path>
+      platform:<win|linux|mac>
+      env_set:<VAR_NAME>
+      var:<name>=<value>
+    """
+    if not condition:
+        return True
+    cond = condition.strip()
+
+    # Подстановка переменных контекста
+    for k, v in ctx.get("user_vars", {}).items():
+        cond = cond.replace(f"{{{k}}}", str(v))
+
+    if cond.startswith("file_exists:"):
+        return os.path.isfile(cond[12:])
+    if cond.startswith("dir_exists:"):
+        return os.path.isdir(cond[11:])
+    if cond.startswith("platform:"):
+        p = cond[9:].lower()
+        return (p == "win" and IS_WIN) or (p == "linux" and IS_LINUX) or (p == "mac" and IS_MAC)
+    if cond.startswith("env_set:"):
+        return bool(os.environ.get(cond[8:], ""))
+    if cond.startswith("var:"):
+        # var:name=value
+        rest = cond[4:]
+        if "=" in rest:
+            k, v = rest.split("=", 1)
+            return str(ctx.get("user_vars", {}).get(k, "")) == v
+    # Просто True/False
+    return cond.lower() not in ("false", "0", "no", "")
+
+
+def _pf_patch_ini(filepath: str, patches: list, log_cb) -> bool:
+    """
+    Функция для работы с INI файлами.
+    patches: [{section, key, value, create_if_missing}]
+    """
+    if not os.path.isfile(filepath):
+        log_cb(f"  ⚠ INI не найден: {filepath}")
+        return False
+    cfg = configparser.ConfigParser(strict=False)
+    cfg.optionxform = str   # сохраняем регистр
+    cfg.read(filepath, encoding="utf-8")
+    for patch in patches:
+        sec = patch.get("section", "DEFAULT")
+        key = patch.get("key", "")
+        val = str(patch.get("value", ""))
+        create = patch.get("create_if_missing", True)
+        if sec not in cfg:
+            if create:
+                cfg[sec] = {}
+            else:
+                log_cb(f"  ⚠ секция [{sec}] не найдена, пропуск")
+                continue
+        cfg[sec][key] = val
+        log_cb(f"  ✏ INI [{sec}] {key} = {val}")
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            cfg.write(f)
+        return True
+    except Exception as e:
+        log_cb(f"  ❌ ошибка записи INI: {e}")
+        return False
+
+
+def _pf_patch_json(filepath: str, patches: list, log_cb) -> bool:
+    """
+    Функция для работы с JSON конфигами.
+    patches: [{path: "key.subkey.subsubkey", value: ..., create_if_missing: true}]
+    path поддерживает точечную нотацию.
+    """
+    if not os.path.isfile(filepath):
+        log_cb(f"  ⚠ JSON не найден: {filepath}")
+        return False
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        log_cb(f"  ❌ ошибка чтения JSON: {e}")
+        return False
+
+    for patch in patches:
+        key_path = patch.get("path", "")
+        value    = patch.get("value")
+        create   = patch.get("create_if_missing", True)
+        keys     = key_path.split(".")
+        node     = data
+        try:
+            for k in keys[:-1]:
+                if k not in node and create:
+                    node[k] = {}
+                node = node[k]
+            node[keys[-1]] = value
+            log_cb(f"  ✏ JSON {key_path} = {json.dumps(value, ensure_ascii=False)}")
+        except Exception as e:
+            log_cb(f"  ⚠ не удалось применить патч {key_path}: {e}")
+
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        log_cb(f"  ❌ ошибка записи JSON: {e}")
+        return False
+
+
+# ── Диалог вопросов к пользователю ────────────────────────────────────────────
+
+class InstallQuestionsDialog(QDialog):
+    """
+    Диалог для задания вопросов пользователю в процессе установки.
+    Поддерживает: text (ввод текста), select (выпадающий список), checkbox (флажок).
+    Также спрашивает «применить ко всем модам» если модов несколько.
+    """
+    def __init__(self, questions: list, mod_title: str, total_mods: int, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"⚙ Установка: {mod_title}")
+        self.setMinimumWidth(460)
+        self._answers = {}
+        self._apply_to_all = False
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+
+        header = QLabel(f"<b>Настройка установки мода:</b><br>{mod_title}")
+        header.setWordWrap(True)
+        lay.addWidget(header)
+
+        sep = QFrame(); sep.setFrameShape(QFrame.HLine); lay.addWidget(sep)
+
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        inner = QWidget(); inner_lay = QVBoxLayout(inner); inner_lay.setSpacing(8)
+
+        self._widgets = {}
+        for q in questions:
+            qid   = q.get("id", "")
+            label = q.get("label", qid)
+            qtype = q.get("type", "text")
+            default = q.get("default", "")
+
+            grp = QGroupBox(label)
+            gl  = QVBoxLayout(grp)
+
+            if qtype == "text":
+                w = QLineEdit()
+                w.setText(str(default))
+                w.setPlaceholderText(q.get("placeholder", ""))
+                gl.addWidget(w)
+                self._widgets[qid] = ("text", w)
+
+            elif qtype == "select":
+                w = QComboBox()
+                items = q.get("items", [])
+                for it in items:
+                    if isinstance(it, dict):
+                        w.addItem(it.get("label", str(it.get("value", ""))),
+                                  userData=it.get("value", ""))
+                    else:
+                        w.addItem(str(it), userData=it)
+                # Выбираем default
+                for i in range(w.count()):
+                    if str(w.itemData(i)) == str(default):
+                        w.setCurrentIndex(i); break
+                gl.addWidget(w)
+                self._widgets[qid] = ("select", w)
+
+            elif qtype == "checkbox":
+                w = QCheckBox(q.get("checkbox_label", "Включить"))
+                w.setChecked(bool(default))
+                gl.addWidget(w)
+                self._widgets[qid] = ("checkbox", w)
+
+            if q.get("hint"):
+                hint = QLabel(f"<i style='color:#888'>{q['hint']}</i>")
+                hint.setWordWrap(True)
+                gl.addWidget(hint)
+
+            inner_lay.addWidget(grp)
+
+        scroll.setWidget(inner)
+        lay.addWidget(scroll)
+
+        # «Применить ко всем модам»
+        if total_mods > 1:
+            self._chk_all = QCheckBox(f"Применить эти настройки ко всем {total_mods} модам")
+            lay.addWidget(self._chk_all)
+        else:
+            self._chk_all = None
+
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(self._accept)
+        btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+
+    def _accept(self):
+        for qid, (qtype, widget) in self._widgets.items():
+            if qtype == "text":
+                self._answers[qid] = widget.text()
+            elif qtype == "select":
+                self._answers[qid] = widget.currentData()
+            elif qtype == "checkbox":
+                self._answers[qid] = widget.isChecked()
+        if self._chk_all:
+            self._apply_to_all = self._chk_all.isChecked()
+        self.accept()
+
+    def get_answers(self) -> dict:
+        return self._answers
+
+    def apply_to_all(self) -> bool:
+        return self._apply_to_all
+
+
+# ── Движок установки одного мода ──────────────────────────────────────────────
+
+class ModInstaller:
+    """
+    Выполняет установку одного мода согласно инструкции (recipe).
+    Поддерживает оба формата:
+      - Параметрический (declarative): только JSON-steps
+      - Гибридный: JSON-steps + запуск внешнего Python-плагина
+    """
+
+    STEP_HANDLERS = {
+        "find_game_folder": "_step_find_game_folder",
+        "detect_store":     "_step_detect_store",
+        "read_file":        "_step_read_file",
+        "copy":             "_step_copy",
+        "patch_ini":        "_step_patch_ini",
+        "patch_json":       "_step_patch_json",
+        "plugin":           "_step_plugin",
+    }
+
+    def __init__(self, recipe: dict, mod_folder: str, log_cb, user_answers: dict = None):
+        self.recipe       = recipe
+        self.mod_folder   = mod_folder   # папка с файлами скачанного мода
+        self.log          = log_cb
+        self.ctx = {
+            "game_folder":        "",
+            "mod_folder":         mod_folder,
+            "workshopdl_source":  True,   # мод всегда скачан через SteamCMD
+            "store":              "",
+            "version":            "",
+            "user_vars":          user_answers or {},
+        }
+
+    def run(self) -> bool:
+        """Выполняет все шаги инструкции. Возвращает True если успешно."""
+        steps = self.recipe.get("steps", [])
+        if not steps:
+            self.log("  ⚠ Инструкция пуста — шагов нет")
+            return False
+
+        for i, step in enumerate(steps, 1):
+            action = step.get("action", "")
+            label  = step.get("label", action)
+            when   = step.get("when", "")
+
+            # Условие when
+            if when and not _pf_safe_eval_condition(when, self.ctx):
+                self.log(f"  ⏭ Шаг {i} «{label}» — пропущен (условие не выполнено)")
+                continue
+
+            self.log(f"  ▶ Шаг {i}: {label}")
+            handler_name = self.STEP_HANDLERS.get(action)
+            if not handler_name:
+                self.log(f"  ⚠ Неизвестное действие: {action}")
+                continue
+
+            try:
+                ok = getattr(self, handler_name)(step)
+            except Exception as e:
+                self.log(f"  ❌ Ошибка в шаге {i}: {e}")
+                ok = False
+
+            if not ok and step.get("required", False):
+                self.log(f"  🛑 Шаг {i} обязательный, прерываем установку")
+                return False
+
+        return True
+
+    # ── Шаг: find_game_folder ─────────────────────────────────────────────────
+    def _step_find_game_folder(self, step: dict) -> bool:
+        folder = _pf_find_game_folder(step, self.ctx)
+        if folder:
+            self.ctx["game_folder"] = folder
+            self.log(f"  📂 Папка игры найдена: {folder}")
+            return True
+        manual = step.get("manual_fallback")
+        if manual:
+            self.log(f"  ⚠ Папка не найдена автоматически — используется fallback: {manual}")
+            self.ctx["game_folder"] = manual
+            return True
+        self.log("  ⚠ Папка игры не найдена")
+        return False
+
+    # ── Шаг: detect_store ────────────────────────────────────────────────────
+    def _step_detect_store(self, step: dict) -> bool:
+        """
+        Определяет КАК УСТАНОВЛЕНА ИГРА (Steam/GOG/Epic/other).
+
+        Ключевой момент: WorkshopDL скачивает моды через SteamCMD, значит
+        скачанный мод — всегда Steam-источник. Но ИГРА может быть установлена
+        из GOG или Epic — и тогда папка назначения для мода отличается.
+
+        Логика:
+          - ctx["workshopdl_source"] = True → мод точно из Steam (Workshop)
+          - game_folder определяется через find_game_folder перед этим шагом
+          - _pf_detect_game_store ищет признаки в папке ИГРЫ, не мода
+
+        Результат в ctx:
+          ctx["store"]   — магазин игры ("steam"/"gog"/"epic"/"other")
+          ctx["version"] — версия игры или ""
+          ctx["user_vars"]["store"]   — доступно в шаблонах как {store}
+          ctx["user_vars"]["version"] — доступно как {version}
+
+        Если game_folder не найдена — определяем по пути из ctx["mod_folder"]
+        (мод лежит в steamapps/workshop → игра вероятно тоже в Steam).
+        """
+        game_folder = self.ctx.get("game_folder", "")
+
+        # ── Особый случай: game_folder не задана ──────────────────────────────
+        # Мод скачан через WorkshopDL → он всегда из SteamCMD.
+        # Если папку игры ещё не нашли — определяем store по пути мода.
+        if not game_folder:
+            mod_folder = self.ctx.get("mod_folder", "")
+            norm_mod = mod_folder.replace("\\", "/").lower()
+            if "steamapps/workshop/content" in norm_mod:
+                # 100% Steam — мод лежит в workshop/content
+                self.ctx["store"]   = "steam"
+                self.ctx["version"] = ""
+                self.ctx["user_vars"]["store"]   = "steam"
+                self.ctx["user_vars"]["version"] = ""
+                self.log("  🎮 Магазин: STEAM (WorkshopDL — мод из SteamCMD workshop)")
+                self.log("  ℹ  game_folder не задана — запустите find_game_folder для установки")
+                return True
+            self.log("  ⚠ detect_store: game_folder не задана, запустите find_game_folder раньше")
+            return False
+
+        result  = _pf_detect_game_store(game_folder, step, self.ctx)
+        store   = result["store"]
+        version = result["version"]
+        evidence = result["evidence"]
+        votes    = result.get("votes", {})
+
+        self.ctx["store"]   = store
+        self.ctx["version"] = version
+        self.ctx["user_vars"]["store"]   = store
+        self.ctx["user_vars"]["version"] = version
+
+        store_icon = {"steam": "🎮", "gog": "🌌", "epic": "⚡", "other": "📦"}.get(store, "❓")
+        self.log(f"  {store_icon} Магазин игры: {store.upper()}")
+
+        # Показываем голоса если есть соперники
+        if votes:
+            vote_str = "  " + "  ".join(
+                f"{s.upper()}:{v}" for s, v in sorted(votes.items(), key=lambda x: -x[1]) if v > 0
+            )
+            if vote_str.strip():
+                self.log(f"  📊 Голоса детектора:{vote_str}")
+
+        if version:
+            self.log(f"  🏷  Версия игры: {version}")
+
+        if evidence:
+            shown = evidence[:4]
+            rest  = len(evidence) - 4
+            self.log("  🔍 Признаки: " + ", ".join(shown) + (f" + ещё {rest}" if rest > 0 else ""))
+
+        # Предупреждение: WorkshopDL скачивает только через Steam —
+        # если игра GOG/Epic, это нормально, мод всё равно Steam-версии
+        if store in ("gog", "epic"):
+            self.log(
+                f"  ℹ  Игра установлена через {store.upper()}, "
+                f"но мод скачан через SteamCMD — убедитесь что игра "
+                f"поддерживает Steam Workshop моды в {store.upper()} версии"
+            )
+
+        return True
+
+    # ── Шаг: read_file ────────────────────────────────────────────────────────
+    def _step_read_file(self, step: dict) -> bool:
+        """
+        Читает значение из файла и сохраняет в ctx["user_vars"][save_as].
+        JSON-инструкция:
+          {
+            "action": "read_file",
+            "label": "Читаем версию",
+            "save_as": "game_version",      // ключ в user_vars (default: "read_value")
+            "required": false,
+            "file":   "version.txt",
+            "format": "auto",               // text | json | ini | binary | auto
+            "extract": {
+              "regex": "Version[:\\s]+([\\d.]+)"
+            }
+          }
+        После выполнения значение доступно как {game_version} в шаблонах путей.
+        """
+        save_as = step.get("save_as", "read_value")
+        base    = self.ctx.get("game_folder", self.ctx.get("mod_folder", ""))
+        value   = _pf_read_file_value(base, step, self.ctx)
+
+        if value is not None:
+            self.ctx["user_vars"][save_as] = value
+            self.log(f"  📄 {save_as} = {value!r}")
+            return True
+        else:
+            fallback = step.get("fallback")
+            if fallback is not None:
+                self.ctx["user_vars"][save_as] = str(fallback)
+                self.log(f"  📄 {save_as} = {fallback!r} (fallback)")
+                return True
+            self.log(f"  ⚠ read_file: значение не найдено ({step.get('file', '?')})")
+            return not step.get("required", False)
+
+
+    def _step_copy(self, step: dict) -> bool:
+        src = step.get("src", "{mod_folder}").format(**self._tpl())
+        dst = step.get("dst", "{game_folder}").format(**self._tpl())
+        if not dst:
+            self.log("  ⚠ Целевая папка не задана (нет game_folder?)")
+            return False
+        os.makedirs(dst, exist_ok=True)
+        copied = _pf_smart_copy(src, dst, step, self.log)
+        return bool(copied) or not step.get("required", False)
+
+    # ── Шаг: patch_ini ────────────────────────────────────────────────────────
+    def _step_patch_ini(self, step: dict) -> bool:
+        path = step.get("file", "").format(**self._tpl())
+        return _pf_patch_ini(path, step.get("patches", []), self.log)
+
+    # ── Шаг: patch_json ───────────────────────────────────────────────────────
+    def _step_patch_json(self, step: dict) -> bool:
+        path = step.get("file", "").format(**self._tpl())
+        return _pf_patch_json(path, step.get("patches", []), self.log)
+
+    # ── Шаг: plugin (гибридный режим) ────────────────────────────────────────
+    def _step_plugin(self, step: dict) -> bool:
+        """
+        Запускает внешний Python-плагин.
+        plugin_file: имя .py файла в INSTALL_LOCAL_DIR/plugins/
+        или plugin_url: прямой URL до скрипта на GitHub.
+        Плагин должен содержать функцию: install(ctx: dict, log_cb) -> bool
+        """
+        plugin_file = step.get("plugin_file", "")
+        plugin_url  = step.get("plugin_url", "")
+
+        if plugin_url:
+            # Скачиваем плагин
+            fname = os.path.basename(plugin_url.split("?")[0]) or "plugin_temp.py"
+            plugin_path = os.path.join(INSTALL_LOCAL_DIR, "plugins", fname)
+            os.makedirs(os.path.dirname(plugin_path), exist_ok=True)
+            try:
+                r = requests.get(plugin_url, timeout=10)
+                r.raise_for_status()
+                with open(plugin_path, "w", encoding="utf-8") as f:
+                    f.write(r.text)
+            except Exception as e:
+                self.log(f"  ❌ Не удалось скачать плагин: {e}")
+                return False
+        elif plugin_file:
+            plugin_path = os.path.join(INSTALL_LOCAL_DIR, "plugins", plugin_file)
+            if not os.path.isfile(plugin_path):
+                self.log(f"  ❌ Плагин не найден: {plugin_path}")
+                return False
+        else:
+            self.log("  ❌ Шаг plugin: не указан plugin_file или plugin_url")
+            return False
+
+        # Загружаем и запускаем
+        try:
+            spec   = importlib.util.spec_from_file_location("wdl_plugin", plugin_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            # Передаём контекст и дополнительные параметры из шага
+            plugin_ctx = {**self.ctx, **step.get("params", {})}
+            result = module.install(plugin_ctx, self.log)
+            return bool(result)
+        except Exception as e:
+            self.log(f"  ❌ Ошибка выполнения плагина: {e}")
+            return False
+
+    def _tpl(self) -> dict:
+        """Шаблонные переменные для подстановки в путях."""
+        return {
+            "game_folder": self.ctx.get("game_folder", ""),
+            "mod_folder":  self.ctx.get("mod_folder", ""),
+            **self.ctx.get("user_vars", {}),
+        }
+
+
+# ── Фоновый воркер установки (пакетная установка нескольких модов) ────────────
+
+class InstallWorker(QThread):
+    log_line   = pyqtSignal(str)
+    progress   = pyqtSignal(int, int)   # current, total
+    mod_status = pyqtSignal(str, bool)  # mod_id, success
+    finished   = pyqtSignal(int, int)   # success_count, fail_count
+
+    def __init__(self, recipe: dict, mod_folders: dict, user_answers: dict):
+        """
+        recipe       — инструкция установки (один dict, общий для всех модов)
+        mod_folders  — {mod_id: folder_path}
+        user_answers — ответы пользователя на вопросы
+        """
+        super().__init__()
+        self.recipe       = recipe
+        self.mod_folders  = mod_folders
+        self.user_answers = user_answers
+
+    def run(self):
+        total   = len(self.mod_folders)
+        success = fail = 0
+        for i, (mod_id, folder) in enumerate(self.mod_folders.items(), 1):
+            self.progress.emit(i - 1, total)
+            self.log_line.emit(f"\n📦 [{i}/{total}] Установка мода {mod_id}...")
+            self.log_line.emit(f"   Папка: {folder}")
+            installer = ModInstaller(
+                self.recipe, folder, self.log_line.emit, self.user_answers
+            )
+            ok = installer.run()
+            if ok:
+                success += 1
+                self.log_line.emit(f"  ✅ Мод {mod_id} установлен успешно")
+            else:
+                fail += 1
+                self.log_line.emit(f"  ❌ Мод {mod_id} — ошибка установки")
+            self.mod_status.emit(mod_id, ok)
+
+        self.progress.emit(total, total)
+        self.finished.emit(success, fail)
+
+
+# ── Главный диалог установки (точка входа из MainWindow) ──────────────────────
+
+class InstallDialog(QDialog):
+    """
+    Диалог, который:
+    1. Показывает инструкцию и список модов
+    2. Задаёт вопросы пользователю (если есть)
+    3. Запускает InstallWorker и показывает прогресс + лог
+    """
+
+    def __init__(self, recipe: dict, mod_folders: dict, parent=None):
+        super().__init__(parent)
+        self.recipe      = recipe
+        self.mod_folders = mod_folders  # {mod_id: folder_path}
+        self._worker     = None
+        self._answers    = {}
+
+        game_name = recipe.get("game_name", "Игра")
+        self.setWindowTitle(f"📥 Установка модов — {game_name}")
+        self.setMinimumSize(640, 480)
+
+        lay = QVBoxLayout(self)
+
+        # Заголовок
+        info_text = (
+            f"<b>Игра:</b> {game_name}<br>"
+            f"<b>Описание:</b> {recipe.get('description', '—')}<br>"
+            f"<b>Модов для установки:</b> {len(mod_folders)}"
+        )
+        info = QLabel(info_text)
+        info.setWordWrap(True)
+        lay.addWidget(info)
+
+        sep = QFrame(); sep.setFrameShape(QFrame.HLine); lay.addWidget(sep)
+
+        # Список модов
+        grp = QGroupBox("Моды:")
+        gl  = QVBoxLayout(grp)
+        self._mod_list = QListWidget()
+        for mod_id, folder in mod_folders.items():
+            self._mod_list.addItem(f"  {mod_id}  ({folder})")
+        gl.addWidget(self._mod_list)
+        lay.addWidget(grp)
+
+        # Прогресс
+        self._progress = QProgressBar()
+        self._progress.setFormat("%v / %m")
+        self._progress.setMaximum(len(mod_folders))
+        self._progress.setValue(0)
+        lay.addWidget(self._progress)
+
+        # Лог
+        grp_log = QGroupBox("Лог установки:")
+        ll = QVBoxLayout(grp_log)
+        self._log = QTextEdit()
+        self._log.setReadOnly(True)
+        self._log.setFont(QFont("Consolas", 9))
+        self._log.setMinimumHeight(160)
+        ll.addWidget(self._log)
+        lay.addWidget(grp_log)
+
+        # Кнопки
+        self._btn_install = QPushButton("▶ Начать установку")
+        self._btn_install.setFixedHeight(34)
+        f = self._btn_install.font(); f.setBold(True); self._btn_install.setFont(f)
+        self._btn_install.clicked.connect(self._start)
+        self._btn_close = QPushButton("Закрыть")
+        self._btn_close.clicked.connect(self.accept)
+        row = QHBoxLayout()
+        row.addWidget(self._btn_install)
+        row.addWidget(self._btn_close)
+        lay.addLayout(row)
+
+    def _start(self):
+        self._btn_install.setEnabled(False)
+        questions = self.recipe.get("questions", [])
+        # Задаём вопросы если они есть
+        if questions:
+            dlg = InstallQuestionsDialog(
+                questions,
+                mod_title=self.recipe.get("game_name", "Игра"),
+                total_mods=len(self.mod_folders),
+                parent=self,
+            )
+            if dlg.exec_() != QDialog.Accepted:
+                self._btn_install.setEnabled(True)
+                return
+            self._answers = dlg.get_answers()
+            self._log_append(f"✍ Ответы пользователя: {self._answers}")
+
+        self._log_append("🚀 Установка началась...\n")
+        self._worker = InstallWorker(self.recipe, self.mod_folders, self._answers)
+        self._worker.log_line.connect(self._log_append)
+        self._worker.progress.connect(lambda c, t: self._progress.setValue(c))
+        self._worker.mod_status.connect(self._on_mod_status)
+        self._worker.finished.connect(self._on_finished)
+        self._worker.start()
+
+    def _log_append(self, text: str):
+        self._log.append(text)
+        self._log.verticalScrollBar().setValue(
+            self._log.verticalScrollBar().maximum()
+        )
+
+    def _on_mod_status(self, mod_id: str, success: bool):
+        icon = "✅" if success else "❌"
+        for i in range(self._mod_list.count()):
+            if mod_id in self._mod_list.item(i).text():
+                self._mod_list.item(i).setText(
+                    f"  {icon} {mod_id}"
+                )
+                break
+
+    def _on_finished(self, ok: int, fail: int):
+        self._btn_close.setText("✔ Готово")
+        total = ok + fail
+        self._log_append(
+            f"\n{'='*50}\n"
+            f"📊 Итог установки: {ok}/{total} успешно, {fail} с ошибками\n"
+            f"{'='*50}"
+        )
+        QMessageBox.information(
+            self, "Установка завершена",
+            f"Установлено: {ok} из {total}\n"
+            f"С ошибками: {fail}\n\n"
+            "Подробности — в логе установки."
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# КОНЕЦ МОД-УСТАНОВЩИКА
+# ══════════════════════════════════════════════════════════════════════════════
+
+
 class MainWindow(QMainWindow):
     # Сигналы для безопасного обновления UI из фоновых потоков
     _sig_set_game_id   = pyqtSignal(str, str)   # app_id, name
@@ -1634,6 +3239,89 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.Yes:
             if not open_folder(folder):
                 QMessageBox.warning(self, t("app_title"), t("msg_folder_not_found", path=folder))
+
+        # ── Предложить установку если есть инструкция ─────────────────────
+        if success > 0:
+            self._offer_install(game_id, folder)
+
+    # ── Установка модов ───────────────────────────────────────────────────────
+
+    def _offer_install(self, game_id: str, content_folder: str):
+        """
+        Вызывается после скачивания.
+        Проверяет наличие инструкции на GitHub — если есть, предлагает установить.
+        """
+        self._log("🔍 Проверяю инструкцию установки...")
+
+        def _bg():
+            recipe = install_fetch_recipe(game_id)
+            if recipe:
+                self._sig_log.emit(
+                    f"📥 Найдена инструкция установки для игры {game_id} "
+                    f"({recipe.get('game_name', '')})"
+                )
+                # Открываем диалог в главном потоке
+                from PyQt5.QtCore import QMetaObject, Q_ARG
+                QMetaObject.invokeMethod(
+                    self, "_slot_open_install_dialog",
+                    Qt.QueuedConnection,
+                    Q_ARG(str, game_id),
+                    Q_ARG(str, content_folder),
+                )
+            else:
+                self._sig_log.emit(
+                    f"ℹ Инструкции установки для игры {game_id} нет — "
+                    f"моды остаются в папке загрузки"
+                )
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    @pyqtSlot(str, str)
+    def _slot_open_install_dialog(self, game_id: str, content_folder: str):
+        """Открывает диалог установки (всегда из главного потока)."""
+        recipe = install_fetch_recipe(game_id)
+        if not recipe:
+            return
+
+        # Спрашиваем пользователя
+        reply = QMessageBox.question(
+            self,
+            "📥 Установка модов",
+            f"Найдена инструкция установки для игры:\n"
+            f"<b>{recipe.get('game_name', game_id)}</b>\n\n"
+            f"{recipe.get('description', '')}\n\n"
+            f"Установить скачанные моды прямо сейчас?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            self._log("⏭ Установка пропущена пользователем")
+            return
+
+        # Собираем папки скачанных модов
+        mod_ids = [self.mod_list.item(i).text() for i in range(self.mod_list.count())]
+        mod_folders = {}
+        for mid in mod_ids:
+            candidate = os.path.join(content_folder, mid)
+            if os.path.isdir(candidate):
+                mod_folders[mid] = candidate
+            else:
+                # Ищем рекурсивно — steamcmd может создавать подпапки
+                for dirpath, dirs, _ in os.walk(content_folder):
+                    if os.path.basename(dirpath) == mid:
+                        mod_folders[mid] = dirpath
+                        break
+
+        if not mod_folders:
+            self._log(f"⚠ Папки модов не найдены в {content_folder}")
+            return
+
+        self._log(f"📂 Найдено {len(mod_folders)} папок модов для установки")
+        dlg = InstallDialog(recipe, mod_folders, parent=self)
+        dlg.exec_()
+
+        # Добавляем итог в основной лог
+        self._log("\n" + "─" * 50)
+        self._log("Лог установки доступен в окне установщика выше.")
 
     # ── Проверка обновлений: пути ─────────────────────────────────────────────
     def _browse_update_path(self):
