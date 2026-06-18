@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "workshopdl.py"   # блок запуска
+      - "!install/**"
 
 permissions:
   contents: write
