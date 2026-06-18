@@ -650,12 +650,63 @@ class UpdateCheckWorker(QThread):
 GITHUB_REPO      = "Pushkinmazila2/WorkshopDL"
 GITHUB_LANG_API  = f"https://api.github.com/repos/{GITHUB_REPO}/contents/lang"
 GITHUB_LANG_RAW  = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/lang"
-LANG_LOCAL_DIR   = os.path.join(MODULES_PATH, "lang")   # куда сохраняем скачанные языки
+LANG_LOCAL_DIR   = os.path.join(MODULES_PATH, "lang")
 
 # ── Установщик модов: GitHub ──────────────────────────────────────────────────
-GITHUB_INSTALL_API = f"https://api.github.com/repos/{GITHUB_REPO}/contents/install"
-GITHUB_INSTALL_RAW = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/install"
-INSTALL_LOCAL_DIR  = os.path.join(MODULES_PATH, "install")  # кеш инструкций
+# Основной репозиторий с инструкциями. Может быть переопределён в настройках.
+INSTALL_REPO_DEFAULT = "Pushkinmazila2/WorkshopDL"
+INSTALL_PATH_DEFAULT = "install"   # папка внутри репо: install/[game_id].json
+INSTALL_LOCAL_DIR    = os.path.join(MODULES_PATH, "install")
+
+def _install_repo_url(cfg: configparser.ConfigParser = None) -> tuple[str, str]:
+    """
+    Возвращает (raw_base_url, api_base_url) для инструкций установки.
+    Читает из cfg если передан, иначе возвращает дефолт.
+    Поддерживает форматы:
+      - "owner/repo"                     → github.com, папка install/
+      - "owner/repo/tree/branch/folder"  → кастомная ветка и папка
+      - "https://raw.githubusercontent.com/..."  → прямой raw URL
+    """
+    if cfg is not None:
+        saved = cfg_get(cfg, "WorkshopDL", "InstallRepo", "")
+        if saved:
+            repo_str = saved.strip()
+        else:
+            repo_str = f"{INSTALL_REPO_DEFAULT}/{INSTALL_PATH_DEFAULT}"
+    else:
+        repo_str = f"{INSTALL_REPO_DEFAULT}/{INSTALL_PATH_DEFAULT}"
+
+    # Прямой https URL
+    if repo_str.startswith("https://"):
+        raw = repo_str.rstrip("/")
+        api = raw  # для прямых URL используем raw напрямую
+        return raw, api
+
+    # Разбираем "owner/repo[/tree/branch[/folder]]"
+    parts = repo_str.strip("/").split("/")
+    if len(parts) < 2:
+        parts = [INSTALL_REPO_DEFAULT, INSTALL_PATH_DEFAULT]
+
+    owner  = parts[0]
+    repo   = parts[1]
+
+    # Определяем ветку и папку
+    if len(parts) >= 4 and parts[2] == "tree":
+        branch = parts[3]
+        folder = "/".join(parts[4:]) if len(parts) > 4 else ""
+    else:
+        branch = "main"
+        folder = "/".join(parts[2:]) if len(parts) > 2 else INSTALL_PATH_DEFAULT
+
+    folder = folder.strip("/") or INSTALL_PATH_DEFAULT
+    raw = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{folder}"
+    api = f"https://api.github.com/repos/{owner}/{repo}/contents/{folder}"
+    return raw, api
+
+# Динамические URL — пересчитываются при загрузке настроек
+GITHUB_INSTALL_RAW, GITHUB_INSTALL_API = _install_repo_url()
+
+
 
 # Человекочитаемые имена языков по коду файла
 LANG_DISPLAY = {
@@ -759,21 +810,26 @@ class LangFetchWorker(QThread):
 
 # ── Получение инструкции с GitHub ─────────────────────────────────────────────
 
-def install_fetch_recipe(game_id: str, force: bool = False) -> dict | None:
+def install_fetch_recipe(game_id: str, force: bool = False,
+                         cfg: configparser.ConfigParser = None) -> dict | None:
     """
     Скачивает/возвращает из кеша инструкцию установки для игры.
-    Формат файла: install/<game_id>.json
+    Файл на GitHub: <install_folder>/<game_id>.json
+    Поддерживает кастомный репозиторий из настроек (cfg).
     Возвращает dict или None если инструкции нет.
     """
     os.makedirs(INSTALL_LOCAL_DIR, exist_ok=True)
     local = os.path.join(INSTALL_LOCAL_DIR, f"{game_id}.json")
+
     if os.path.exists(local) and not force:
         try:
             with open(local, encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass
-    url = f"{GITHUB_INSTALL_RAW}/{game_id}.json"
+
+    raw_base, _ = _install_repo_url(cfg)
+    url = f"{raw_base}/{game_id}.json"
     try:
         r = requests.get(url, timeout=10)
         if r.status_code == 404:
@@ -1675,39 +1731,212 @@ def _pf_smart_copy(src_root: str, dst_root: str, params: dict, log_cb) -> list[s
 
 def _pf_safe_eval_condition(condition: str, ctx: dict) -> bool:
     """
-    Функция безопасного вычисления условий (when).
-    Поддерживает:
-      file_exists:<path>
-      dir_exists:<path>
-      platform:<win|linux|mac>
-      env_set:<VAR_NAME>
-      var:<name>=<value>
+    Расширенный вычислитель условий (when).
+
+    Поддерживает логические выражения с &&, ||, !, скобки:
+      "(store == 'steam' || store == 'gog') && version != ''"
+      "file_exists('{game_folder}/game.exe') && platform == 'win'"
+      "!file_exists('{game_folder}/mod_list.xml')"
+
+    Атомарные выражения:
+      store == 'steam'              — сравнение переменной ctx
+      version != ''                 — неравенство
+      version >= '1.5'              — лексикографическое сравнение
+      platform == 'win'|'linux'|'mac'
+      file_exists('path')           — файл существует
+      dir_exists('path')            — папка существует
+      file_contains('path','regex') — файл содержит паттерн
+      disk_free('path') > 1000      — свободное место в МБ
+      env_set('VAR')                — переменная окружения задана
+      env('VAR') == 'value'         — значение переменной окружения
+      var_set('name')               — переменная ctx задана и не пуста
+      True / False                  — литералы
     """
     if not condition:
         return True
+
     cond = condition.strip()
 
-    # Подстановка переменных контекста
-    for k, v in ctx.get("user_vars", {}).items():
-        cond = cond.replace(f"{{{k}}}", str(v))
+    # Подстановка шаблонов {var} из ctx
+    tpl = _build_tpl(ctx)
+    try:
+        cond = cond.format(**tpl)
+    except (KeyError, ValueError):
+        pass
 
-    if cond.startswith("file_exists:"):
-        return os.path.isfile(cond[12:])
-    if cond.startswith("dir_exists:"):
-        return os.path.isdir(cond[11:])
-    if cond.startswith("platform:"):
-        p = cond[9:].lower()
-        return (p == "win" and IS_WIN) or (p == "linux" and IS_LINUX) or (p == "mac" and IS_MAC)
-    if cond.startswith("env_set:"):
-        return bool(os.environ.get(cond[8:], ""))
-    if cond.startswith("var:"):
-        # var:name=value
-        rest = cond[4:]
-        if "=" in rest:
-            k, v = rest.split("=", 1)
-            return str(ctx.get("user_vars", {}).get(k, "")) == v
-    # Просто True/False
-    return cond.lower() not in ("false", "0", "no", "")
+    return _eval_expr(cond, ctx)
+
+
+def _build_tpl(ctx: dict) -> dict:
+    """Собирает словарь для подстановки {var} из ctx."""
+    tpl = {
+        "game_folder":  ctx.get("game_folder", ""),
+        "mod_folder":   ctx.get("mod_folder", ""),
+        "store":        ctx.get("store", ""),
+        "version":      ctx.get("version", ""),
+        "APPDATA":      os.environ.get("APPDATA", ""),
+        "LOCALAPPDATA": os.environ.get("LOCALAPPDATA", ""),
+        "USERPROFILE":  os.path.expanduser("~"),
+    }
+    tpl.update(ctx.get("user_vars", {}))
+    return tpl
+
+
+def _eval_expr(expr: str, ctx: dict) -> bool:
+    """Рекурсивный парсер логических выражений."""
+    expr = expr.strip()
+    if not expr:
+        return True
+
+    # ── Скобки — рекурсия ────────────────────────────────────────────────────
+    # Ищем внешние скобки (не вложенные)
+    if expr.startswith("("):
+        depth = 0
+        for i, ch in enumerate(expr):
+            if ch == "(": depth += 1
+            elif ch == ")": depth -= 1
+            if depth == 0:
+                inner  = expr[1:i]
+                rest   = expr[i+1:].strip()
+                result = _eval_expr(inner, ctx)
+                if not rest:
+                    return result
+                # Продолжение: && или ||
+                if rest.startswith("&&"):
+                    return result and _eval_expr(rest[2:].strip(), ctx)
+                if rest.startswith("||"):
+                    return result or  _eval_expr(rest[2:].strip(), ctx)
+                return result
+
+    # ── Отрицание ─────────────────────────────────────────────────────────────
+    if expr.startswith("!") and not expr.startswith("!="):
+        return not _eval_expr(expr[1:].strip(), ctx)
+
+    # ── || (OR) — ищем вне скобок и кавычек ──────────────────────────────────
+    idx = _find_operator(expr, "||")
+    if idx >= 0:
+        return _eval_expr(expr[:idx], ctx) or _eval_expr(expr[idx+2:], ctx)
+
+    # ── && (AND) ──────────────────────────────────────────────────────────────
+    idx = _find_operator(expr, "&&")
+    if idx >= 0:
+        return _eval_expr(expr[:idx], ctx) and _eval_expr(expr[idx+2:], ctx)
+
+    # ── Атомарные выражения ───────────────────────────────────────────────────
+    return _eval_atom(expr.strip(), ctx)
+
+
+def _find_operator(expr: str, op: str) -> int:
+    """Ищет оператор op вне скобок и строковых литералов."""
+    depth = 0
+    in_str = None
+    i = 0
+    while i < len(expr):
+        ch = expr[i]
+        if in_str:
+            if ch == in_str:
+                in_str = None
+        elif ch in ('"', "'"):
+            in_str = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth == 0 and expr[i:i+len(op)] == op:
+            return i
+        i += 1
+    return -1
+
+
+def _eval_atom(atom: str, ctx: dict) -> bool:
+    """
+    Вычисляет одно атомарное условие.
+    """
+    atom = atom.strip()
+    vars_ = ctx.get("user_vars", {})
+
+    # ── Функции ───────────────────────────────────────────────────────────────
+    # file_exists('path')
+    m = re.match(r"^file_exists\(['\"](.*?)['\"]\)$", atom)
+    if m:
+        return os.path.isfile(m.group(1))
+
+    # dir_exists('path')
+    m = re.match(r"^dir_exists\(['\"](.*?)['\"]\)$", atom)
+    if m:
+        return os.path.isdir(m.group(1))
+
+    # file_contains('path', 'regex')
+    m = re.match(r"^file_contains\(['\"](.*?)['\"],\s*['\"](.*?)['\"]\)$", atom)
+    if m:
+        fpath, pattern = m.group(1), m.group(2)
+        try:
+            content = open(fpath, encoding="utf-8", errors="replace").read()
+            return bool(re.search(pattern, content))
+        except Exception:
+            return False
+
+    # disk_free('path') > N  или  disk_free('path') >= N
+    m = re.match(r"^disk_free\(['\"](.*?)['\"]\)\s*(>=|>|==|<|<=)\s*(\d+)$", atom)
+    if m:
+        path_, op_, mb_ = m.group(1), m.group(2), int(m.group(3))
+        try:
+            free_mb = shutil.disk_usage(path_).free // (1024 * 1024)
+            return _compare(free_mb, op_, mb_)
+        except Exception:
+            return False
+
+    # env_set('VAR')
+    m = re.match(r"^env_set\(['\"](.*?)['\"]\)$", atom)
+    if m:
+        return bool(os.environ.get(m.group(1), ""))
+
+    # env('VAR') == 'value'
+    m = re.match(r"^env\(['\"](.*?)['\"]\)\s*(==|!=)\s*['\"]?(.*?)['\"]?$", atom)
+    if m:
+        env_val = os.environ.get(m.group(1), "")
+        return _compare_str(env_val, m.group(2), m.group(3))
+
+    # var_set('name')
+    m = re.match(r"^var_set\(['\"](.*?)['\"]\)$", atom)
+    if m:
+        return bool(vars_.get(m.group(1), ""))
+
+    # platform == 'win'|'linux'|'mac'
+    m = re.match(r"^platform\s*(==|!=)\s*['\"](\w+)['\"]$", atom)
+    if m:
+        op_, plat = m.group(1), m.group(2).lower()
+        current = "win" if IS_WIN else ("mac" if IS_MAC else "linux")
+        return _compare_str(current, op_, plat)
+
+    # ── Сравнения переменных  var == 'value' / var != '' / var >= '1.2' ───────
+    m = re.match(r"^(\w+)\s*(==|!=|>=|<=|>|<)\s*['\"]?(.*?)['\"]?$", atom)
+    if m:
+        var_name, op_, rhs = m.group(1), m.group(2), m.group(3)
+        # Ищем в user_vars, потом в ctx
+        lhs = str(vars_.get(var_name, ctx.get(var_name, "")))
+        return _compare_str(lhs, op_, rhs)
+
+    # Литералы True / False / "true" / "false"
+    if atom.lower() in ("true", "1", "yes"):  return True
+    if atom.lower() in ("false", "0", "no"):  return False
+
+    # Непустая строка = True
+    return bool(atom)
+
+
+def _compare(a, op: str, b) -> bool:
+    if op == "==": return a == b
+    if op == "!=": return a != b
+    if op == ">":  return a > b
+    if op == ">=": return a >= b
+    if op == "<":  return a < b
+    if op == "<=": return a <= b
+    return False
+
+def _compare_str(a: str, op: str, b: str) -> bool:
+    return _compare(a, op, b)
+
 
 
 def _pf_patch_ini(filepath: str, patches: list, log_cb) -> bool:
@@ -1893,6 +2122,308 @@ class InstallQuestionsDialog(QDialog):
 
 # ── Движок установки одного мода ──────────────────────────────────────────────
 
+
+def _pf_patch_xml(filepath: str, patches: list, log_cb) -> bool:
+    """
+    Функция для работы с XML конфигами.
+    patches: [{xpath, attribute, value, create_if_missing, action}]
+      xpath            — XPath выражение для поиска элемента
+      attribute        — атрибут для изменения (если пустой — меняем text элемента)
+      value            — новое значение
+      create_if_missing — bool (default False)
+      action           — "set"(default) | "delete" | "append_child"
+                         append_child: value содержит XML-строку нового дочернего элемента
+    """
+    try:
+        import xml.etree.ElementTree as ET
+    except ImportError:
+        log_cb("  ❌ xml.etree.ElementTree недоступен")
+        return False
+
+    if not os.path.isfile(filepath):
+        log_cb(f"  ⚠ XML не найден: {filepath}")
+        return False
+    try:
+        tree = ET.parse(filepath)
+        root = tree.getroot()
+    except Exception as e:
+        log_cb(f"  ❌ Ошибка парсинга XML: {e}")
+        return False
+
+    for patch in patches:
+        xpath   = patch.get("xpath", "")
+        attr    = patch.get("attribute", "")
+        value   = str(patch.get("value", ""))
+        action  = patch.get("action", "set")
+        create  = patch.get("create_if_missing", False)
+
+        elements = root.findall(xpath)
+        if not elements:
+            if create and action == "set":
+                # Создаём элемент по простому пути (без предикатов)
+                parts = xpath.strip("./").split("/")
+                node = root
+                for part in parts:
+                    child = node.find(part)
+                    if child is None:
+                        import xml.etree.ElementTree as ET2
+                        child = ET2.SubElement(node, part)
+                    node = child
+                elements = [node]
+            else:
+                log_cb(f"  ⚠ XML xpath не найден: {xpath}")
+                continue
+
+        for el in elements:
+            if action == "set":
+                if attr:
+                    el.set(attr, value)
+                    log_cb(f"  ✏ XML {xpath} @{attr} = {value}")
+                else:
+                    el.text = value
+                    log_cb(f"  ✏ XML {xpath} text = {value}")
+            elif action == "delete":
+                parent = root.find(xpath + "/..")
+                if parent is not None:
+                    parent.remove(el)
+                    log_cb(f"  🗑 XML удалён элемент {xpath}")
+            elif action == "append_child":
+                try:
+                    import xml.etree.ElementTree as ET3
+                    child = ET3.fromstring(value)
+                    el.append(child)
+                    log_cb(f"  ➕ XML добавлен дочерний элемент в {xpath}")
+                except Exception as e:
+                    log_cb(f"  ❌ XML append_child: {e}")
+
+    try:
+        # Сохраняем с сохранением отступов
+        ET.indent(tree, space="  ")
+        tree.write(filepath, encoding="unicode", xml_declaration=True)
+        return True
+    except AttributeError:
+        # ET.indent появился в Python 3.9
+        tree.write(filepath, encoding="unicode", xml_declaration=True)
+        return True
+    except Exception as e:
+        log_cb(f"  ❌ Ошибка записи XML: {e}")
+        return False
+
+
+def _pf_patch_cfg(filepath: str, patches: list, log_cb) -> bool:
+    """
+    Функция для работы с CFG/простыми конфигами формата 'key = value' или 'key value'.
+    Поддерживает однострочные комментарии // и #.
+    patches: [{key, value, separator, create_if_missing, comment}]
+      key              — имя ключа
+      value            — новое значение
+      separator        — разделитель " = " (default) | " " | ":"
+      create_if_missing — bool (default True): добавить если нет
+      comment          — строка комментария над строкой (опционально)
+      section          — для CFG с секциями [Section] (опционально)
+    """
+    if not os.path.isfile(filepath):
+        log_cb(f"  ⚠ CFG не найден: {filepath}")
+        return False
+    try:
+        with open(filepath, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except Exception as e:
+        log_cb(f"  ❌ Ошибка чтения CFG: {e}")
+        return False
+
+    for patch in patches:
+        key       = patch.get("key", "")
+        value     = str(patch.get("value", ""))
+        sep       = patch.get("separator", " = ")
+        create    = patch.get("create_if_missing", True)
+        section   = patch.get("section", "")
+        comment   = patch.get("comment", "")
+        found     = False
+        in_section = not section  # если секция не задана — считаем что сразу внутри
+
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            # Смена секции
+            if stripped.startswith("[") and stripped.endswith("]"):
+                in_section = (stripped[1:-1].strip() == section)
+                continue
+            if not in_section:
+                continue
+            # Пропуск комментариев
+            if stripped.startswith(("#", "//")):
+                continue
+            # Ищем ключ (любой разделитель = / : / пробел)
+            m = re.match(rf"^({re.escape(key)})\s*[=: ]\s*(.*)$", stripped)
+            if m:
+                new_line = f"{key}{sep}{value}\n"
+                lines[idx] = new_line
+                log_cb(f"  ✏ CFG {key}{sep}{value}")
+                found = True
+                break
+
+        if not found and create:
+            if comment:
+                lines.append(f"# {comment}\n")
+            lines.append(f"{key}{sep}{value}\n")
+            log_cb(f"  ➕ CFG добавлен {key}{sep}{value}")
+
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+        return True
+    except Exception as e:
+        log_cb(f"  ❌ Ошибка записи CFG: {e}")
+        return False
+
+
+def _pf_rename_files(base_folder: str, rules: list, log_cb) -> int:
+    """
+    Функция переименования файлов по regex.
+    rules: [{pattern, replacement, glob, recursive, dry_run}]
+      glob        — паттерн файлов для поиска (default "**/*")
+      pattern     — regex для поиска в имени файла
+      replacement — строка замены (поддерживает \\1, \\2 — группы)
+      recursive   — bool (default True)
+      dry_run     — bool: только показать что будет переименовано
+    Возвращает количество переименованных файлов.
+    """
+    renamed = 0
+    for rule in rules:
+        file_glob   = rule.get("glob", "**/*")
+        pattern     = rule.get("pattern", "")
+        replacement = rule.get("replacement", "")
+        recursive   = rule.get("recursive", True)
+        dry_run     = rule.get("dry_run", False)
+
+        if not pattern:
+            log_cb("  ⚠ rename: не задан pattern")
+            continue
+
+        matches = glob.glob(os.path.join(base_folder, file_glob), recursive=recursive)
+        for fpath in matches:
+            if os.path.isdir(fpath):
+                continue
+            dirname  = os.path.dirname(fpath)
+            basename = os.path.basename(fpath)
+            new_name = re.sub(pattern, replacement, basename)
+            if new_name == basename:
+                continue
+            new_path = os.path.join(dirname, new_name)
+            if dry_run:
+                log_cb(f"  🔍 [dry_run] переименую: {basename} → {new_name}")
+            else:
+                try:
+                    os.rename(fpath, new_path)
+                    log_cb(f"  📝 переименован: {basename} → {new_name}")
+                    renamed += 1
+                except Exception as e:
+                    log_cb(f"  ❌ ошибка переименования {basename}: {e}")
+    return renamed
+
+
+def _pf_delete_files(base_folder: str, rules: list, log_cb) -> int:
+    """
+    Функция удаления файлов и папок.
+    rules: [{glob, recursive, missing_ok, dry_run}]
+      glob        — паттерн (glob) относительно base_folder
+      recursive   — bool: удалять папки рекурсивно (default False)
+      missing_ok  — bool: не ошибаться если нет (default True)
+      dry_run     — bool: только показать
+    Возвращает количество удалённых объектов.
+    """
+    deleted = 0
+    for rule in rules:
+        pattern    = rule.get("glob", "")
+        recursive  = rule.get("recursive", False)
+        missing_ok = rule.get("missing_ok", True)
+        dry_run    = rule.get("dry_run", False)
+
+        if not pattern:
+            log_cb("  ⚠ delete: не задан glob")
+            continue
+
+        matches = glob.glob(os.path.join(base_folder, pattern), recursive=True)
+        if not matches and not missing_ok:
+            log_cb(f"  ⚠ delete: не найдено файлов по паттерну {pattern}")
+            continue
+
+        for fpath in matches:
+            if dry_run:
+                log_cb(f"  🔍 [dry_run] удалю: {os.path.relpath(fpath, base_folder)}")
+                continue
+            try:
+                if os.path.isdir(fpath):
+                    if recursive:
+                        shutil.rmtree(fpath)
+                        log_cb(f"  🗑 удалена папка: {os.path.relpath(fpath, base_folder)}")
+                        deleted += 1
+                    else:
+                        log_cb(f"  ⚠ {fpath} — папка, укажите recursive=true")
+                else:
+                    os.remove(fpath)
+                    log_cb(f"  🗑 удалён файл: {os.path.relpath(fpath, base_folder)}")
+                    deleted += 1
+            except Exception as e:
+                log_cb(f"  ❌ ошибка удаления {os.path.basename(fpath)}: {e}")
+    return deleted
+
+
+def _pf_check_disk(path: str, required_mb: int) -> dict:
+    """
+    Проверка свободного места на диске.
+    Возвращает: {ok, free_mb, required_mb, path}
+    """
+    try:
+        usage   = shutil.disk_usage(path)
+        free_mb = usage.free // (1024 * 1024)
+        return {"ok": free_mb >= required_mb, "free_mb": free_mb, "required_mb": required_mb, "path": path}
+    except Exception as e:
+        return {"ok": False, "free_mb": 0, "required_mb": required_mb, "path": path, "error": str(e)}
+
+
+def _pf_backup_file(filepath: str, log_cb, suffix: str = ".bak", keep: int = 3) -> str | None:
+    """
+    Создаёт резервную копию файла.
+      suffix — расширение бэкапа (default .bak)
+      keep   — сколько версий хранить (default 3): file.bak, file.bak.1, file.bak.2
+    Возвращает путь к созданному бэкапу или None при ошибке.
+    """
+    if not os.path.isfile(filepath):
+        log_cb(f"  ⚠ backup: файл не найден: {filepath}")
+        return None
+
+    base = filepath + suffix
+    # Ротация: .bak.2 ← .bak.1 ← .bak ← оригинал
+    for i in range(keep - 1, 0, -1):
+        old = f"{base}.{i}"
+        new = f"{base}.{i+1}" if i + 1 < keep else None
+        if os.path.exists(old):
+            if new:
+                try:
+                    shutil.copy2(old, new)
+                except Exception:
+                    pass
+            try:
+                os.remove(old)
+            except Exception:
+                pass
+    if os.path.exists(base):
+        try:
+            shutil.copy2(base, base + ".1")
+            os.remove(base)
+        except Exception:
+            pass
+
+    try:
+        shutil.copy2(filepath, base)
+        log_cb(f"  💾 бэкап создан: {os.path.basename(base)}")
+        return base
+    except Exception as e:
+        log_cb(f"  ❌ ошибка создания бэкапа: {e}")
+        return None
+
+
 class ModInstaller:
     """
     Выполняет установку одного мода согласно инструкции (recipe).
@@ -1902,74 +2433,270 @@ class ModInstaller:
     """
 
     STEP_HANDLERS = {
+        # Поиск и определение
         "find_game_folder": "_step_find_game_folder",
         "detect_store":     "_step_detect_store",
         "read_file":        "_step_read_file",
+        # Управление переменными
+        "set_var":          "_step_set_var",
+        # Файловые операции
         "copy":             "_step_copy",
+        "rename":           "_step_rename",
+        "delete":           "_step_delete",
+        "backup":           "_step_backup",
+        # Патчи конфигов
         "patch_ini":        "_step_patch_ini",
         "patch_json":       "_step_patch_json",
+        "patch_xml":        "_step_patch_xml",
+        "patch_cfg":        "_step_patch_cfg",
+        # Системные
+        "check_disk":       "_step_check_disk",
+        # Гибридный режим
         "plugin":           "_step_plugin",
     }
 
+    # Псевдо-действия управления потоком — обрабатываются в run() напрямую
+    _FLOW_ACTIONS = {"if", "else", "elif", "end_if", "for", "end_for", "while", "end_while"}
+
     def __init__(self, recipe: dict, mod_folder: str, log_cb, user_answers: dict = None):
         self.recipe       = recipe
-        self.mod_folder   = mod_folder   # папка с файлами скачанного мода
+        self.mod_folder   = mod_folder
         self.log          = log_cb
         self.ctx = {
             "game_folder":        "",
             "mod_folder":         mod_folder,
-            "workshopdl_source":  True,   # мод всегда скачан через SteamCMD
+            "workshopdl_source":  True,
             "store":              "",
             "version":            "",
             "user_vars":          user_answers or {},
         }
 
     def run(self) -> bool:
-        """Выполняет все шаги инструкции. Возвращает True если успешно."""
+        """Выполняет все шаги инструкции с поддержкой if/else/for/while."""
         steps = self.recipe.get("steps", [])
         if not steps:
             self.log("  ⚠ Инструкция пуста — шагов нет")
             return False
+        ok = self._exec_steps(steps)
+        return ok
 
-        for i, step in enumerate(steps, 1):
+    def _exec_steps(self, steps: list, depth: int = 0) -> bool:
+        """
+        Основной исполнитель шагов. Поддерживает вложенные блоки:
+          if / elif / else / end_if
+          for  (итерация по массиву)
+          while (цикл с условием, max_iter защита от бесконечного цикла)
+        """
+        i = 0
+        while i < len(steps):
+            step   = steps[i]
             action = step.get("action", "")
             label  = step.get("label", action)
-            when   = step.get("when", "")
 
-            # Условие when
-            if when and not _pf_safe_eval_condition(when, self.ctx):
-                self.log(f"  ⏭ Шаг {i} «{label}» — пропущен (условие не выполнено)")
+            # ── IF ────────────────────────────────────────────────────────────
+            if action == "if":
+                # Собираем все ветки до end_if
+                branches, end_idx = self._collect_if_branches(steps, i)
+                self._exec_if(branches)
+                i = end_idx + 1
                 continue
 
-            self.log(f"  ▶ Шаг {i}: {label}")
+            # ── FOR ───────────────────────────────────────────────────────────
+            if action == "for":
+                body, end_idx = self._collect_block(steps, i + 1, "end_for")
+                self._exec_for(step, body)
+                i = end_idx + 1
+                continue
+
+            # ── WHILE ─────────────────────────────────────────────────────────
+            if action == "while":
+                body, end_idx = self._collect_block(steps, i + 1, "end_while")
+                self._exec_while(step, body)
+                i = end_idx + 1
+                continue
+
+            # Пропускаем закрывающие маркеры если попали сюда напрямую
+            if action in ("end_if", "end_for", "end_while", "else", "elif"):
+                i += 1
+                continue
+
+            # ── Обычный шаг ───────────────────────────────────────────────────
+            when = step.get("when", "")
+            if when and not _pf_safe_eval_condition(when, self.ctx):
+                self.log(f"  ⏭ «{label}» — пропущен (when={when!r})")
+                i += 1
+                continue
+
+            self.log(f"  ▶ {label}")
             handler_name = self.STEP_HANDLERS.get(action)
             if not handler_name:
-                self.log(f"  ⚠ Неизвестное действие: {action}")
+                self.log(f"  ⚠ Неизвестное действие: {action!r}")
+                i += 1
                 continue
 
             try:
                 ok = getattr(self, handler_name)(step)
             except Exception as e:
-                self.log(f"  ❌ Ошибка в шаге {i}: {e}")
+                self.log(f"  ❌ Ошибка в шаге «{label}»: {e}")
                 ok = False
 
             if not ok and step.get("required", False):
-                self.log(f"  🛑 Шаг {i} обязательный, прерываем установку")
+                self.log(f"  🛑 Шаг «{label}» обязательный, прерываем установку")
                 return False
 
+            i += 1
         return True
 
-    # ── Шаг: find_game_folder ─────────────────────────────────────────────────
+    # ── Управление потоком ────────────────────────────────────────────────────
+
+    def _collect_if_branches(self, steps: list, start: int):
+        """
+        Собирает ветки if/elif/else/end_if начиная с позиции start.
+        Возвращает (branches, end_idx).
+        branches = [{"cond": str|None, "body": [steps]}]
+        """
+        branches = []
+        cur_cond = steps[start].get("when", steps[start].get("condition", "True"))
+        cur_body = []
+        depth = 0
+        i = start + 1
+        while i < len(steps):
+            a = steps[i].get("action", "")
+            if a == "if":
+                depth += 1
+            if depth == 0:
+                if a in ("elif", "else", "end_if"):
+                    branches.append({"cond": cur_cond, "body": cur_body})
+                    if a == "end_if":
+                        return branches, i
+                    cur_cond = steps[i].get("condition", "") if a == "elif" else None
+                    cur_body = []
+                    i += 1
+                    continue
+            if a == "end_if" and depth > 0:
+                depth -= 1
+            cur_body.append(steps[i])
+            i += 1
+        branches.append({"cond": cur_cond, "body": cur_body})
+        return branches, i - 1
+
+    def _exec_if(self, branches: list):
+        for branch in branches:
+            cond = branch["cond"]
+            # else ветка
+            if cond is None or _pf_safe_eval_condition(cond, self.ctx):
+                self._exec_steps(branch["body"])
+                return
+
+    def _collect_block(self, steps: list, start: int, end_action: str):
+        """Собирает тело блока до end_action с учётом вложенности."""
+        body  = []
+        depth = 0
+        outer_action = end_action.replace("end_", "")
+        i = start
+        while i < len(steps):
+            a = steps[i].get("action", "")
+            if a == outer_action:
+                depth += 1
+            if a == end_action:
+                if depth == 0:
+                    return body, i
+                depth -= 1
+            body.append(steps[i])
+            i += 1
+        return body, i - 1
+
+    def _exec_for(self, step: dict, body: list):
+        """
+        for-loop по массиву.
+        step:
+          var      — имя переменной итерации (default "item")
+          items    — список значений  ["a","b","c"]
+          items_var — имя переменной ctx содержащей список (альтернатива items)
+        """
+        var_name  = step.get("var", "item")
+        items     = step.get("items")
+        items_var = step.get("items_var", "")
+        if items is None and items_var:
+            raw = self.ctx["user_vars"].get(items_var, "")
+            items = raw if isinstance(raw, list) else str(raw).split(",")
+        if not items:
+            self.log(f"  ⚠ for: items пустой")
+            return
+        for val in items:
+            self.ctx["user_vars"][var_name] = str(val).strip()
+            self.log(f"  🔁 for {var_name} = {val!r}")
+            self._exec_steps(body)
+
+    def _exec_while(self, step: dict, body: list):
+        """
+        while-loop.
+        step:
+          condition — выражение (тот же синтаксис что when)
+          max_iter  — защита от бесконечного цикла (default 100)
+        """
+        condition = step.get("condition", step.get("when", "False"))
+        max_iter  = int(step.get("max_iter", 100))
+        it = 0
+        while _pf_safe_eval_condition(condition, self.ctx):
+            if it >= max_iter:
+                self.log(f"  ⚠ while: достигнут лимит {max_iter} итераций, выходим")
+                break
+            self.log(f"  🔁 while итерация {it + 1}")
+            self._exec_steps(body)
+            it += 1
+
+    # ── Шаги ─────────────────────────────────────────────────────────────────
+
+    # ── set_var ───────────────────────────────────────────────────────────────
+    def _step_set_var(self, step: dict) -> bool:
+        """
+        Задаёт переменную в ctx["user_vars"].
+        step:
+          vars: {"name": "value", ...}   — задать несколько сразу
+          name / value                   — задать одну
+          eval: "expression"             — вычислить как условие → "true"/"false"
+          concat: ["part1", "{var}", "part2"]  — склеить строки
+        """
+        tpl = self._tpl()
+
+        # Несколько переменных
+        for k, v in step.get("vars", {}).items():
+            rendered = str(v).format(**tpl) if isinstance(v, str) else str(v)
+            self.ctx["user_vars"][k] = rendered
+            self.log(f"  📌 {k} = {rendered!r}")
+
+        # Одна переменная
+        name = step.get("name", "")
+        if name:
+            if "eval" in step:
+                result = "true" if _pf_safe_eval_condition(step["eval"], self.ctx) else "false"
+                self.ctx["user_vars"][name] = result
+                self.log(f"  📌 {name} = {result!r} (eval)")
+            elif "concat" in step:
+                parts = [str(p).format(**tpl) for p in step["concat"]]
+                result = "".join(parts)
+                self.ctx["user_vars"][name] = result
+                self.log(f"  📌 {name} = {result!r} (concat)")
+            else:
+                val = str(step.get("value", "")).format(**tpl)
+                self.ctx["user_vars"][name] = val
+                self.log(f"  📌 {name} = {val!r}")
+        return True
+
+    # ── find_game_folder ──────────────────────────────────────────────────────
     def _step_find_game_folder(self, step: dict) -> bool:
         folder = _pf_find_game_folder(step, self.ctx)
         if folder:
             self.ctx["game_folder"] = folder
+            self.ctx["user_vars"]["game_folder"] = folder
             self.log(f"  📂 Папка игры найдена: {folder}")
             return True
         manual = step.get("manual_fallback")
         if manual:
-            self.log(f"  ⚠ Папка не найдена автоматически — используется fallback: {manual}")
             self.ctx["game_folder"] = manual
+            self.ctx["user_vars"]["game_folder"] = manual
+            self.log(f"  ⚠ Используется fallback: {manual}")
             return True
         self.log("  ⚠ Папка игры не найдена")
         return False
@@ -2104,29 +2831,132 @@ class ModInstaller:
         copied = _pf_smart_copy(src, dst, step, self.log)
         return bool(copied) or not step.get("required", False)
 
-    # ── Шаг: patch_ini ────────────────────────────────────────────────────────
+    # ── rename ────────────────────────────────────────────────────────────────
+    def _step_rename(self, step: dict) -> bool:
+        base = step.get("base", "{game_folder}").format(**self._tpl())
+        rules = step.get("rules", [step])   # можно одно правило прямо в шаге
+        count = _pf_rename_files(base, rules, self.log)
+        self.log(f"  📝 Переименовано файлов: {count}")
+        return True
+
+    # ── delete ────────────────────────────────────────────────────────────────
+    def _step_delete(self, step: dict) -> bool:
+        base  = step.get("base", "{game_folder}").format(**self._tpl())
+        rules = step.get("rules", [step])
+        count = _pf_delete_files(base, rules, self.log)
+        self.log(f"  🗑 Удалено объектов: {count}")
+        return True
+
+    # ── backup ────────────────────────────────────────────────────────────────
+    def _step_backup(self, step: dict) -> bool:
+        """
+        Создаёт .bak копию файла или всей папки.
+          path   — путь к файлу или папке (шаблон)
+          suffix — расширение бэкапа (default ".bak")
+          keep   — сколько версий ротировать (default 3)
+          folder — true: бэкапить всю папку как .bak.zip
+        """
+        tpl    = self._tpl()
+        path   = step.get("path", "").format(**tpl)
+        suffix = step.get("suffix", ".bak")
+        keep   = int(step.get("keep", 3))
+
+        if not path:
+            self.log("  ⚠ backup: не задан path")
+            return False
+
+        if step.get("folder") and os.path.isdir(path):
+            # Бэкап папки → zip
+            zip_path = path.rstrip("/\\") + suffix + ".zip"
+            try:
+                with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for dp, _, files in os.walk(path):
+                        for f in files:
+                            fp = os.path.join(dp, f)
+                            zf.write(fp, os.path.relpath(fp, os.path.dirname(path)))
+                self.log(f"  💾 бэкап папки: {os.path.basename(zip_path)}")
+                return True
+            except Exception as e:
+                self.log(f"  ❌ ошибка бэкапа папки: {e}")
+                return False
+
+        # Бэкап файла
+        if os.path.isfile(path):
+            result = _pf_backup_file(path, self.log, suffix=suffix, keep=keep)
+            return result is not None
+        # Glob: бэкапим несколько файлов
+        matches = glob.glob(path)
+        if not matches:
+            self.log(f"  ⚠ backup: файл не найден: {path}")
+            return not step.get("required", False)
+        for fp in matches:
+            _pf_backup_file(fp, self.log, suffix=suffix, keep=keep)
+        return True
+
+    # ── check_disk ────────────────────────────────────────────────────────────
+    def _step_check_disk(self, step: dict) -> bool:
+        """
+        Проверяет свободное место на диске.
+          path        — путь для проверки (default game_folder или mod_folder)
+          required_mb — сколько нужно МБ
+          save_as     — имя переменной для результата "true"/"false" (опционально)
+          required    — если true и места нет — прерывает установку
+        """
+        tpl     = self._tpl()
+        path    = step.get("path", tpl.get("game_folder") or tpl.get("mod_folder", "."))
+        path    = path.format(**tpl)
+        req_mb  = int(step.get("required_mb", 0))
+        save_as = step.get("save_as", "")
+
+        result  = _pf_check_disk(path or ".", req_mb)
+        ok      = result["ok"]
+        free_mb = result["free_mb"]
+
+        status = "✅" if ok else "⚠"
+        self.log(f"  {status} Диск {path}: свободно {free_mb} МБ, требуется {req_mb} МБ — {'OK' if ok else 'НЕДОСТАТОЧНО'}")
+
+        if save_as:
+            self.ctx["user_vars"][save_as] = "true" if ok else "false"
+            self.log(f"  📌 {save_as} = {'true' if ok else 'false'}")
+
+        if not ok and step.get("required", False):
+            self.log(f"  🛑 Недостаточно места: нужно {req_mb} МБ, доступно {free_mb} МБ")
+            return False
+        return True
+
+    # ── patch_ini ─────────────────────────────────────────────────────────────
     def _step_patch_ini(self, step: dict) -> bool:
         path = step.get("file", "").format(**self._tpl())
         return _pf_patch_ini(path, step.get("patches", []), self.log)
 
-    # ── Шаг: patch_json ───────────────────────────────────────────────────────
+    # ── patch_json ────────────────────────────────────────────────────────────
     def _step_patch_json(self, step: dict) -> bool:
         path = step.get("file", "").format(**self._tpl())
         return _pf_patch_json(path, step.get("patches", []), self.log)
 
-    # ── Шаг: plugin (гибридный режим) ────────────────────────────────────────
+    # ── patch_xml ─────────────────────────────────────────────────────────────
+    def _step_patch_xml(self, step: dict) -> bool:
+        path = step.get("file", "").format(**self._tpl())
+        return _pf_patch_xml(path, step.get("patches", []), self.log)
+
+    # ── patch_cfg ─────────────────────────────────────────────────────────────
+    def _step_patch_cfg(self, step: dict) -> bool:
+        path = step.get("file", "").format(**self._tpl())
+        return _pf_patch_cfg(path, step.get("patches", []), self.log)
+
+    # ── plugin (гибридный режим) ──────────────────────────────────────────────
     def _step_plugin(self, step: dict) -> bool:
         """
         Запускает внешний Python-плагин.
-        plugin_file: имя .py файла в INSTALL_LOCAL_DIR/plugins/
-        или plugin_url: прямой URL до скрипта на GitHub.
-        Плагин должен содержать функцию: install(ctx: dict, log_cb) -> bool
+        plugin_file: имя .py в INSTALL_LOCAL_DIR/plugins/
+        plugin_url:  прямой URL до скрипта на GitHub
+        Плагин должен содержать: install(ctx, log_cb) -> bool
+                              и опционально: uninstall(ctx, log_cb) -> bool
         """
         plugin_file = step.get("plugin_file", "")
         plugin_url  = step.get("plugin_url", "")
 
         if plugin_url:
-            # Скачиваем плагин
             fname = os.path.basename(plugin_url.split("?")[0]) or "plugin_temp.py"
             plugin_path = os.path.join(INSTALL_LOCAL_DIR, "plugins", fname)
             os.makedirs(os.path.dirname(plugin_path), exist_ok=True)
@@ -2144,18 +2974,21 @@ class ModInstaller:
                 self.log(f"  ❌ Плагин не найден: {plugin_path}")
                 return False
         else:
-            self.log("  ❌ Шаг plugin: не указан plugin_file или plugin_url")
+            self.log("  ❌ plugin: не указан plugin_file или plugin_url")
             return False
 
-        # Загружаем и запускаем
         try:
             spec   = importlib.util.spec_from_file_location("wdl_plugin", plugin_path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            # Передаём контекст и дополнительные параметры из шага
+            mode       = self.ctx.get("_install_mode", "install")
+            fn_name    = "uninstall" if mode == "uninstall" else "install"
+            fn         = getattr(module, fn_name, None)
+            if fn is None:
+                self.log(f"  ⚠ плагин не содержит функцию {fn_name}(), пропуск")
+                return True
             plugin_ctx = {**self.ctx, **step.get("params", {})}
-            result = module.install(plugin_ctx, self.log)
-            return bool(result)
+            return bool(fn(plugin_ctx, self.log))
         except Exception as e:
             self.log(f"  ❌ Ошибка выполнения плагина: {e}")
             return False
@@ -2165,8 +2998,20 @@ class ModInstaller:
         return {
             "game_folder": self.ctx.get("game_folder", ""),
             "mod_folder":  self.ctx.get("mod_folder", ""),
+            "store":       self.ctx.get("store", ""),
+            "version":     self.ctx.get("version", ""),
             **self.ctx.get("user_vars", {}),
         }
+
+    def run_uninstall(self) -> bool:
+        """Запускает блок uninstall из инструкции (если он есть)."""
+        steps = self.recipe.get("uninstall", [])
+        if not steps:
+            self.log("  ℹ Блок uninstall в инструкции не найден")
+            return False
+        self.ctx["_install_mode"] = "uninstall"
+        self.log("🗑 Запуск деинсталляции мода...")
+        return self._exec_steps(steps)
 
 
 # ── Фоновый воркер установки (пакетная установка нескольких модов) ────────────
@@ -2727,10 +3572,62 @@ class MainWindow(QMainWindow):
 
         lay.addWidget(grp_deps)
 
+        # ── Репозиторий инструкций установки ─────────────────────────────────
+        grp_inst = QGroupBox("📥 Репозиторий инструкций установки модов")
+        gi = QVBoxLayout(grp_inst)
+        gi.addWidget(QLabel(
+            "Формат: <b>owner/repo</b> или <b>owner/repo/tree/branch/folder</b><br>"
+            f"По умолчанию: <code>{INSTALL_REPO_DEFAULT}</code> → папка <code>{INSTALL_PATH_DEFAULT}/</code>"
+        ))
+        row_repo = QHBoxLayout()
+        self.inp_install_repo = QLineEdit()
+        self.inp_install_repo.setPlaceholderText(
+            f"{INSTALL_REPO_DEFAULT}/{INSTALL_PATH_DEFAULT}"
+        )
+        self.inp_install_repo.setToolTip(
+            "Репозиторий GitHub с JSON-инструкциями установки.\n"
+            "Файлы должны быть: <папка>/<game_id>.json\n"
+            "Примеры:\n"
+            "  Pushkinmazila2/WorkshopDL\n"
+            "  MyOrg/MyRepo/tree/main/game-installers"
+        )
+        row_repo.addWidget(self.inp_install_repo)
+        self.btn_repo_test = QPushButton("🔍 Проверить")
+        self.btn_repo_test.setFixedWidth(100)
+        self.btn_repo_test.clicked.connect(self._test_install_repo)
+        row_repo.addWidget(self.btn_repo_test)
+        btn_repo_reset = QPushButton("↺ По умолч.")
+        btn_repo_reset.setFixedWidth(90)
+        btn_repo_reset.clicked.connect(lambda: self.inp_install_repo.clear())
+        row_repo.addWidget(btn_repo_reset)
+        gi.addLayout(row_repo)
+        self.lbl_repo_status = QLabel("  Введите репозиторий и нажмите Проверить")
+        self.lbl_repo_status.setStyleSheet("color: #888; font-size: 11px;")
+        gi.addWidget(self.lbl_repo_status)
+
+        row_cache2 = QHBoxLayout()
+        self.btn_clear_install_cache = QPushButton("🗑 Очистить кеш инструкций")
+        self.btn_clear_install_cache.setToolTip(
+            "Удаляет локально кешированные .json инструкции.\n"
+            "При следующей установке они будут заново скачаны с GitHub."
+        )
+        self.btn_clear_install_cache.clicked.connect(self._clear_install_cache)
+        row_cache2.addWidget(self.btn_clear_install_cache)
+        self.lbl_install_cache_info = QLabel("")
+        self.lbl_install_cache_info.setStyleSheet("color: #888; font-size: 11px;")
+        row_cache2.addWidget(self.lbl_install_cache_info)
+        row_cache2.addStretch()
+        gi.addLayout(row_cache2)
+        self._refresh_install_cache_info()
+        lay.addWidget(grp_inst)
+
+        btn_save = QPushButton(t("settings_save"))
+        btn_save.clicked.connect(self._save_settings)
+
         lay.addWidget(btn_save); lay.addStretch()
         return w
 
-    # ── Настройки load/save ───────────────────────────────────────────────────
+
     def _load_settings(self):
         anon = cfg_get(self.cfg, "WorkshopDL", "Anonymous Mode", "1") == "1"
         self.chk_anon.setChecked(anon)
@@ -2743,18 +3640,23 @@ class MainWindow(QMainWindow):
         self._reload_update_paths_combo(saved_path or "")
         self._toggle_anon()
 
-        # Загружаем поведение зависимостей
         deps_behavior = cfg_get(self.cfg, "WorkshopDL", "DepsBehavior", "ask")
         for i in range(self.cmb_deps_behavior.count()):
             if self.cmb_deps_behavior.itemData(i) == deps_behavior:
                 self.cmb_deps_behavior.setCurrentIndex(i)
                 break
-
-        # Размер пачки
         try:
             self.spn_batch.setValue(int(cfg_get(self.cfg, "WorkshopDL", "BatchSize", "1")))
         except Exception:
             pass
+
+        # Репозиторий инструкций
+        install_repo = cfg_get(self.cfg, "WorkshopDL", "InstallRepo", "")
+        if install_repo:
+            self.inp_install_repo.setText(install_repo)
+        # Обновляем глобальные URL
+        global GITHUB_INSTALL_RAW, GITHUB_INSTALL_API
+        GITHUB_INSTALL_RAW, GITHUB_INSTALL_API = _install_repo_url(self.cfg)
 
         # Загружаем сохранённый язык
         lang_path = cfg_get(self.cfg, "WorkshopDL", "LangPath")
@@ -2762,7 +3664,6 @@ class MainWindow(QMainWindow):
             self.inp_lang.setText(lang_path)
             lang_load(lang_path)
         else:
-            # Ищем язык по коду
             lang_code = cfg_get(self.cfg, "WorkshopDL", "LangCode", "en")
             bundled = os.path.join(APP_DIR, f"lang_{lang_code}.json")
             local   = lang_local_path(lang_code)
@@ -2789,8 +3690,97 @@ class MainWindow(QMainWindow):
             mod_paths_add(cur_upd)
         self.cfg["WorkshopDL"]["DepsBehavior"] = self.cmb_deps_behavior.currentData()
         self.cfg["WorkshopDL"]["BatchSize"]    = str(self.spn_batch.value())
+
+        # Репозиторий инструкций
+        repo_val = self.inp_install_repo.text().strip()
+        if repo_val:
+            self.cfg["WorkshopDL"]["InstallRepo"] = repo_val
+        else:
+            self.cfg["WorkshopDL"].pop("InstallRepo", None)
+        # Пересчитываем глобальные URL сразу
+        global GITHUB_INSTALL_RAW, GITHUB_INSTALL_API
+        GITHUB_INSTALL_RAW, GITHUB_INSTALL_API = _install_repo_url(self.cfg)
+
         save_config(self.cfg)
         QMessageBox.information(self, t("app_title"), t("msg_settings_saved"))
+
+    def _test_install_repo(self):
+        """Проверяет доступность репозитория инструкций — делает запрос к API."""
+        repo_val = self.inp_install_repo.text().strip()
+        # Временно применяем введённое значение для теста
+        tmp_cfg = configparser.ConfigParser()
+        tmp_cfg["WorkshopDL"] = {"InstallRepo": repo_val} if repo_val else {}
+        raw_url, api_url = _install_repo_url(tmp_cfg if repo_val else None)
+
+        self.lbl_repo_status.setText("  ⏳ Проверка...")
+        self.lbl_repo_status.setStyleSheet("color: #888;")
+        self.btn_repo_test.setEnabled(False)
+
+        def _check():
+            try:
+                # Пробуем получить список файлов через API
+                r = requests.get(api_url, timeout=8)
+                if r.status_code == 200:
+                    files = r.json()
+                    json_count = sum(1 for f in files if isinstance(f, dict)
+                                     and f.get("name", "").endswith(".json"))
+                    msg = f"  ✅ Репозиторий доступен, найдено {json_count} инструкций"
+                    color = "#4CAF50"
+                elif r.status_code == 404:
+                    msg = "  ❌ Репозиторий или папка не найдены (404)"
+                    color = "#f44336"
+                else:
+                    msg = f"  ⚠ Ответ сервера: {r.status_code}"
+                    color = "#FF9800"
+            except Exception as e:
+                msg   = f"  ❌ Ошибка подключения: {e}"
+                color = "#f44336"
+
+            from PyQt5.QtCore import QMetaObject, Q_ARG
+            QMetaObject.invokeMethod(self, "_slot_repo_test_result",
+                Qt.QueuedConnection,
+                Q_ARG(str, msg), Q_ARG(str, color))
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    @pyqtSlot(str, str)
+    def _slot_repo_test_result(self, msg: str, color: str):
+        self.lbl_repo_status.setText(msg)
+        self.lbl_repo_status.setStyleSheet(f"color: {color}; font-size: 11px;")
+        self.btn_repo_test.setEnabled(True)
+
+    def _refresh_install_cache_info(self):
+        """Обновляет метку с информацией о кеше инструкций."""
+        if not os.path.isdir(INSTALL_LOCAL_DIR):
+            self.lbl_install_cache_info.setText("кеш пуст")
+            return
+        files = [f for f in os.listdir(INSTALL_LOCAL_DIR) if f.endswith(".json")]
+        total_kb = sum(
+            os.path.getsize(os.path.join(INSTALL_LOCAL_DIR, f))
+            for f in files
+        ) // 1024
+        self.lbl_install_cache_info.setText(
+            f"кешировано: {len(files)} инструкций, {total_kb} КБ"
+        )
+
+    def _clear_install_cache(self):
+        """Удаляет кешированные JSON инструкции (не папку plugins/)."""
+        if not os.path.isdir(INSTALL_LOCAL_DIR):
+            return
+        removed = 0
+        for f in os.listdir(INSTALL_LOCAL_DIR):
+            if f.endswith(".json"):
+                try:
+                    os.remove(os.path.join(INSTALL_LOCAL_DIR, f))
+                    removed += 1
+                except Exception:
+                    pass
+        self.lbl_install_cache_info.setText(f"удалено {removed} файлов")
+        QMessageBox.information(self, "WorkshopDL",
+            f"Кеш инструкций очищен: удалено {removed} файлов.\n"
+            "При следующей установке инструкции будут заново скачаны с GitHub.")
+
+
 
     def _toggle_anon(self):
         anon = self.chk_anon.isChecked()
@@ -3252,15 +4242,15 @@ class MainWindow(QMainWindow):
         Проверяет наличие инструкции на GitHub — если есть, предлагает установить.
         """
         self._log("🔍 Проверяю инструкцию установки...")
+        cfg = self.cfg
 
         def _bg():
-            recipe = install_fetch_recipe(game_id)
+            recipe = install_fetch_recipe(game_id, cfg=cfg)
             if recipe:
                 self._sig_log.emit(
                     f"📥 Найдена инструкция установки для игры {game_id} "
                     f"({recipe.get('game_name', '')})"
                 )
-                # Открываем диалог в главном потоке
                 from PyQt5.QtCore import QMetaObject, Q_ARG
                 QMetaObject.invokeMethod(
                     self, "_slot_open_install_dialog",
@@ -3279,7 +4269,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str, str)
     def _slot_open_install_dialog(self, game_id: str, content_folder: str):
         """Открывает диалог установки (всегда из главного потока)."""
-        recipe = install_fetch_recipe(game_id)
+        recipe = install_fetch_recipe(game_id, cfg=self.cfg)
         if not recipe:
             return
 
