@@ -1,87 +1,74 @@
+```json
 {
   "game_id": "784150",
   "game_name": "Workers & Resources: Soviet Republic",
-  "user_inputs": [
+  "description": "Установка Workshop-мода в workshop_wip",
+  "version": "1",
+
+  "questions": [
     {
-      "id": "INSTALL_MODE",
-      "label": "Выберите тип установки (версию игры)",
-      "type": "select",
-      "items": ["Автодетекция", "Steam-версия (Воркшоп)", "GOG / Другая версия (Вручную)"],
-      "default": "Автодетекция"
-    },
-    {
-      "id": "BACKUP_ENABLED",
-      "label": "Создавать резервную копию изменяемых конфигов?",
-      "type": "checkbox",
-      "default": true
-    },
-    {
-      "id": "CUSTOM_MOD_PREFIX",
-      "label": "Префикс для папки мода (оставьте пустым, если не нужен)",
+      "id": "GAME_PATH",
       "type": "text",
-      "default": ""
+      "label": "Укажите путь к папке игры",
+      "default": "C:/games/SovietRepublic",
+      "hint": "Папка с Workers & Resources: Soviet Republic"
     }
   ],
-  "stages": [
+
+  "steps": [
     {
-      "name": "Поиск путей игры",
-      "when": "{INSTALL_MODE} == 'Автодетекция'",
-      "action": "_pf_find_game_folder",
-      "args": {
-        "paths_to_check": [
-          "{STEAM}/steamapps/common/SovietRepublic",
-          "C:/GOG Games/Workers Resources Soviet Republic",
-          "D:/GOG Games/Workers Resources Soviet Republic"
-        ],
-        "registry_keys": [
-          "SOFTWARE\\WOW6432Node\\GOG.com\\Games\\1314983050\\path"
-        ],
-        "env_vars": ["SOVIET_REPUBLIC_HOME"]
-      },
-      "save_to_context": "DETECTED_GAME_FOLDER"
+      "action": "set_var",
+      "name": "game_folder",
+      "value": "{GAME_PATH}"
     },
+
     {
-      "name": "Установка для Steam-версии",
-      "when": "{PLATFORM} == 'steam' or {INSTALL_MODE} == 'Steam-версия (Воркшоп)'",
-      "actions": [
+      "action": "set_var",
+      "name": "mod_id",
+      "value": "{workshop_id}"
+    },
+
+    {
+      "action": "copy",
+      "label": "Устанавливаем мод",
+      "when": "dir_exists('{game_folder}/media_soviet/workshop_wip') && !dir_exists('{game_folder}/media_soviet/workshop_wip/{mod_id}')",
+      "src": "{mod_folder}",
+      "dst": "{game_folder}/media_soviet/workshop_wip/{mod_id}",
+      "files": [
         {
-          "comment": "Steam ищет моды в папке workshop/content/784150/{ID_мода}",
-          "action": "_pf_smart_copy",
-          "args": {
-            "from": "{DOWNLOAD_CACHE}/*",
-            "to": "{STEAM}/steamapps/workshop/content/784150/{CUSTOM_MOD_PREFIX}{DOWNLOADED_MOD_ID}/",
-            "flatten": false,
-            "overwrite": true
-          }
+          "from": "**",
+          "to": ".",
+          "overwrite": false
         }
       ]
-    },
+    }
+  ],
+
+  "uninstall": [
     {
-      "name": "Установка для GOG / Non-Steam версии",
-      "when": "{PLATFORM} == 'gog' or {INSTALL_MODE} == 'GOG / Другая версия (Вручную)'",
-      "actions": [
+      "action": "set_var",
+      "name": "game_folder",
+      "value": "{GAME_PATH}"
+    },
+
+    {
+      "action": "set_var",
+      "name": "mod_id",
+      "value": "{workshop_id}"
+    },
+
+    {
+      "action": "delete",
+      "label": "Удаляем мод",
+      "base": "{game_folder}/media_soviet/workshop_wip",
+      "rules": [
         {
-          "comment": "В GOG-версии моды должны лежать строго в media_soviet/workshop_wip/{ID_мода}",
-          "action": "_pf_smart_copy",
-          "args": {
-            "from": "{DOWNLOAD_CACHE}/*",
-            "to": "{DETECTED_GAME_FOLDER}/media_soviet/workshop_wip/{CUSTOM_MOD_PREFIX}{DOWNLOADED_MOD_ID}/",
-            "flatten": false,
-            "overwrite": true
-          }
-        },
-        {
-          "comment": "Пример использования патча конфигов: если моду требуется прописка в ini игры",
-          "when": "{BACKUP_ENABLED} == true",
-          "action": "_pf_patch_ini",
-          "args": {
-            "file_path": "{DETECTED_GAME_FOLDER}/media_soviet/config.ini",
-            "section": "InstalledMods",
-            "key": "Mod_{DOWNLOADED_MOD_ID}",
-            "value": "1"
-          }
+          "glob": "{mod_id}/",
+          "recursive": true,
+          "missing_ok": true
         }
       ]
     }
   ]
 }
+```
