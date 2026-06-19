@@ -2096,74 +2096,153 @@ def _pf_patch_json(filepath: str, patches: list, log_cb) -> bool:
 class InstallQuestionsDialog(QDialog):
     """
     Диалог для задания вопросов пользователю в процессе установки.
-    Поддерживает: text (ввод текста), select (выпадающий список), checkbox (флажок).
-    Также спрашивает «применить ко всем модам» если модов несколько.
+
+    Поддерживает типы вопросов:
+      text     — текстовый ввод (с опциональной кнопкой обзора файла/папки)
+      select   — выпадающий список
+      checkbox — флажок
+
+    Поддерживает подстановку {переменных} контекста во всех полях:
+      default, placeholder, label, hint, items[].label
+    Это позволяет показывать пользователю уже известные значения
+    (например папку игры из истории) как значение по умолчанию.
     """
-    def __init__(self, questions: list, mod_title: str, total_mods: int, parent=None):
+    def __init__(self, questions: list, mod_title: str, total_mods: int,
+                 ctx: dict = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"⚙ Установка: {mod_title}")
-        self.setMinimumWidth(460)
-        self._answers = {}
+        self.setMinimumWidth(500)
+        self._answers      = {}
         self._apply_to_all = False
+        self._ctx          = ctx or {}
 
         lay = QVBoxLayout(self)
         lay.setSpacing(10)
 
-        header = QLabel(f"<b>Настройка установки мода:</b><br>{mod_title}")
+        header = QLabel(f"<b>Настройка установки:</b><br>{mod_title}")
         header.setWordWrap(True)
         lay.addWidget(header)
 
         sep = QFrame(); sep.setFrameShape(QFrame.HLine); lay.addWidget(sep)
 
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        inner = QWidget(); inner_lay = QVBoxLayout(inner); inner_lay.setSpacing(8)
+        inner = QWidget(); inner_lay = QVBoxLayout(inner); inner_lay.setSpacing(10)
 
         self._widgets = {}
         for q in questions:
             qid   = q.get("id", "")
-            label = q.get("label", qid)
             qtype = q.get("type", "text")
-            default = q.get("default", "")
+
+            # ── Подстановка переменных во все строковые поля ─────────────────
+            label       = self._render(q.get("label",   qid))
+            hint        = self._render(q.get("hint",    ""))
+            default     = self._render(str(q.get("default", "")))
+            placeholder = self._render(q.get("placeholder", ""))
 
             grp = QGroupBox(label)
             gl  = QVBoxLayout(grp)
+            gl.setSpacing(4)
 
+            # ── text ──────────────────────────────────────────────────────────
             if qtype == "text":
+                row_w = QWidget(); row_l = QHBoxLayout(row_w); row_l.setContentsMargins(0,0,0,0)
+
                 w = QLineEdit()
-                w.setText(str(default))
-                w.setPlaceholderText(q.get("placeholder", ""))
-                gl.addWidget(w)
+                w.setText(default)
+                w.setPlaceholderText(placeholder or self._render(
+                    q.get("placeholder_hint", "")
+                ))
+                row_l.addWidget(w)
+
+                # Кнопка обзора файла/папки
+                browse = q.get("browse", "")   # "folder" | "file" | ""
+                if browse:
+                    btn_browse = QPushButton("📂" if browse == "folder" else "📄")
+                    btn_browse.setFixedWidth(32)
+                    btn_browse.setToolTip(
+                        "Выбрать папку" if browse == "folder" else "Выбрать файл"
+                    )
+                    filter_str = q.get("browse_filter", "Все файлы (*)")
+
+                    def _make_browse(widget, btype, flt):
+                        def _do():
+                            if btype == "folder":
+                                path = QFileDialog.getExistingDirectory(
+                                    self, "Выберите папку", widget.text() or ""
+                                )
+                            else:
+                                path, _ = QFileDialog.getOpenFileName(
+                                    self, "Выберите файл", widget.text() or "", flt
+                                )
+                            if path:
+                                widget.setText(path)
+                        return _do
+
+                    btn_browse.clicked.connect(_make_browse(w, browse, filter_str))
+                    row_l.addWidget(btn_browse)
+
+                # Если есть значение из истории — показываем подсказку
+                history_val = self._ctx.get("game_folder", "") if qid == "GAME_PATH" else ""
+                if not history_val:
+                    history_val = self._ctx.get("user_vars", {}).get(qid, "")
+                if history_val and history_val != default:
+                    lbl_hist = QLabel(
+                        f"<span style='color:#5c9;font-size:11px'>"
+                        f"📂 Из истории: <code>{history_val}</code>"
+                        f"</span>"
+                    )
+                    lbl_hist.setWordWrap(True)
+                    lbl_hist.setCursor(Qt.PointingHandCursor)
+                    lbl_hist.mousePressEvent = lambda e, v=history_val, ww=w: ww.setText(v)
+                    lbl_hist.setToolTip("Нажмите чтобы подставить")
+                    gl.addWidget(lbl_hist)
+
+                gl.addWidget(row_w)
                 self._widgets[qid] = ("text", w)
 
+            # ── select ────────────────────────────────────────────────────────
             elif qtype == "select":
                 w = QComboBox()
                 items = q.get("items", [])
                 for it in items:
                     if isinstance(it, dict):
-                        w.addItem(it.get("label", str(it.get("value", ""))),
-                                  userData=it.get("value", ""))
+                        item_label = self._render(it.get("label", str(it.get("value", ""))))
+                        item_value = self._render(str(it.get("value", "")))
+                        w.addItem(item_label, userData=item_value)
                     else:
-                        w.addItem(str(it), userData=it)
-                # Выбираем default
+                        rendered = self._render(str(it))
+                        w.addItem(rendered, userData=it)
+                # Выбираем default (поддерживает подстановку)
+                rendered_default = self._render(str(q.get("default", "")))
                 for i in range(w.count()):
-                    if str(w.itemData(i)) == str(default):
+                    if str(w.itemData(i)) == rendered_default:
                         w.setCurrentIndex(i); break
                 gl.addWidget(w)
                 self._widgets[qid] = ("select", w)
 
+            # ── checkbox ──────────────────────────────────────────────────────
             elif qtype == "checkbox":
-                w = QCheckBox(q.get("checkbox_label", "Включить"))
-                w.setChecked(bool(default))
+                chk_label = self._render(q.get("checkbox_label", "Включить"))
+                w = QCheckBox(chk_label)
+                # default может быть "true"/"false" строкой из контекста
+                raw_default = q.get("default", False)
+                if isinstance(raw_default, str):
+                    checked = raw_default.lower() in ("true", "1", "yes")
+                else:
+                    checked = bool(raw_default)
+                w.setChecked(checked)
                 gl.addWidget(w)
                 self._widgets[qid] = ("checkbox", w)
 
-            if q.get("hint"):
-                hint = QLabel(f"<i style='color:#888'>{q['hint']}</i>")
-                hint.setWordWrap(True)
-                gl.addWidget(hint)
+            # ── hint ──────────────────────────────────────────────────────────
+            if hint:
+                lbl_hint = QLabel(f"<i style='color:#888;font-size:11px'>{hint}</i>")
+                lbl_hint.setWordWrap(True)
+                gl.addWidget(lbl_hint)
 
             inner_lay.addWidget(grp)
 
+        inner_lay.addStretch()
         scroll.setWidget(inner)
         lay.addWidget(scroll)
 
@@ -2175,9 +2254,24 @@ class InstallQuestionsDialog(QDialog):
             self._chk_all = None
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.button(QDialogButtonBox.Ok).setText("✅ Применить")
+        btns.button(QDialogButtonBox.Cancel).setText("Отмена")
         btns.accepted.connect(self._accept)
         btns.rejected.connect(self.reject)
         lay.addWidget(btns)
+
+    def _render(self, text: str) -> str:
+        """Подставляет {переменные} контекста в строку."""
+        if not text or "{" not in text:
+            return text
+        tpl = _build_tpl(self._ctx)
+        try:
+            return text.format(**tpl)
+        except (KeyError, ValueError):
+            # Частичная подстановка — заменяем только известные
+            for k, v in tpl.items():
+                text = text.replace(f"{{{k}}}", str(v))
+            return text
 
     def _accept(self):
         for qid, (qtype, widget) in self._widgets.items():
@@ -3430,6 +3524,7 @@ class InstallDialog(QDialog):
                 questions,
                 mod_title=self.recipe.get("game_name", "Игра"),
                 total_mods=len(self.mod_folders),
+                ctx=self.extra_ctx,
                 parent=self,
             )
             if dlg.exec_() != QDialog.Accepted:
