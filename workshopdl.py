@@ -139,25 +139,76 @@ def queue_clear():
         os.remove(QUEUE_PATH)
 
 # ── История игр ───────────────────────────────────────────────────────────────
-def history_load():
+def history_load() -> dict:
+    """
+    Возвращает историю игр.
+    Формат (новый): {game_id: {name, game_folder, last_used}}
+    Формат (старый): {game_id: "game_name"}  — автоматически мигрирует
+    """
     if not os.path.exists(HISTORY_PATH):
         return {}
     try:
         with open(HISTORY_PATH, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        # Миграция старого формата {id: str} → {id: {name, game_folder, last_used}}
+        migrated = False
+        for k, v in data.items():
+            if isinstance(v, str):
+                data[k] = {"name": v, "game_folder": "", "last_used": ""}
+                migrated = True
+        if migrated:
+            history_save(data)
+        return data
     except Exception:
         return {}
 
-def history_save(data):
+def history_save(data: dict):
     os.makedirs(MODULES_PATH, exist_ok=True)
     with open(HISTORY_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def history_add(game_id, game_name=""):
-    data = history_load()
-    if game_id not in data or (game_name and data[game_id] == game_id):
-        data[game_id] = game_name or game_id
-        history_save(data)
+def history_add(game_id: str, game_name: str = "", game_folder: str = ""):
+    """Добавляет или обновляет запись в истории игр."""
+    data  = history_load()
+    entry = data.get(game_id, {})
+    if isinstance(entry, str):
+        entry = {"name": entry, "game_folder": "", "last_used": ""}
+
+    if game_name and game_name != game_id:
+        entry["name"] = game_name
+    elif "name" not in entry:
+        entry["name"] = game_id
+
+    if game_folder and os.path.isdir(game_folder):
+        entry["game_folder"] = game_folder
+
+    entry["last_used"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    data[game_id] = entry
+    history_save(data)
+
+def history_get_name(game_id: str) -> str:
+    """Возвращает название игры из истории или game_id если не найдено."""
+    entry = history_load().get(game_id, {})
+    if isinstance(entry, dict):
+        return entry.get("name", game_id) or game_id
+    return str(entry) or game_id
+
+def history_get_game_folder(game_id: str) -> str:
+    """
+    Возвращает сохранённый путь к папке игры из истории.
+    Проверяет что папка реально существует — иначе возвращает "".
+    """
+    entry = history_load().get(game_id, {})
+    if isinstance(entry, dict):
+        folder = entry.get("game_folder", "")
+        if folder and os.path.isdir(folder):
+            return folder
+    return ""
+
+def history_set_game_folder(game_id: str, game_folder: str):
+    """Сохраняет путь к папке игры в историю."""
+    if game_folder and os.path.isdir(game_folder):
+        history_add(game_id, game_folder=game_folder)
 
 def history_scan_from_disk(content_path):
     if not os.path.isdir(content_path):
@@ -1768,15 +1819,42 @@ def _pf_safe_eval_condition(condition: str, ctx: dict) -> bool:
 
 
 def _build_tpl(ctx: dict) -> dict:
-    """Собирает словарь для подстановки {var} из ctx."""
+    """Собирает словарь для подстановки {var} в when-условиях из ctx."""
     tpl = {
-        "game_folder":  ctx.get("game_folder", ""),
-        "mod_folder":   ctx.get("mod_folder", ""),
-        "store":        ctx.get("store", ""),
-        "version":      ctx.get("version", ""),
-        "APPDATA":      os.environ.get("APPDATA", ""),
-        "LOCALAPPDATA": os.environ.get("LOCALAPPDATA", ""),
-        "USERPROFILE":  os.path.expanduser("~"),
+        # Системные
+        "USERPROFILE":    ctx.get("USERPROFILE",  os.path.expanduser("~")),
+        "APPDATA":        ctx.get("APPDATA",      os.environ.get("APPDATA", "")),
+        "LOCALAPPDATA":   ctx.get("LOCALAPPDATA", os.environ.get("LOCALAPPDATA", "")),
+        "PROGRAMFILES":   ctx.get("PROGRAMFILES", os.environ.get("ProgramFiles", "")),
+        "PROGRAMFILES86": ctx.get("PROGRAMFILES86", os.environ.get("ProgramFiles(x86)", "")),
+        "STEAM":          ctx.get("STEAM", ""),
+
+        # Идентификаторы
+        "game_id":   ctx.get("game_id",   ""),
+        "mod_id":    ctx.get("mod_id",    ""),
+        "game_name": ctx.get("game_name", ""),
+        # Счётчики модов — доступны в when-условиях
+        "mod_index":    ctx.get("mod_index",    "0"),
+        "mod_number":   ctx.get("mod_number",   "1"),
+        "mod_total":    ctx.get("mod_total",    "1"),
+        "mod_count":    ctx.get("mod_count",    "1"),
+        "mod_is_first": ctx.get("mod_is_first", "true"),
+        "mod_is_last":  ctx.get("mod_is_last",  "true"),
+
+        # Папки
+        "game_folder":    ctx.get("game_folder",    ""),
+        "mod_folder":     ctx.get("mod_folder",     ""),
+        "content_folder": ctx.get("content_folder", ""),
+        "steamcmd_root":  ctx.get("steamcmd_root",  ""),
+
+        # Магазин и версия
+        "store":    ctx.get("store",    ""),
+        "version":  ctx.get("version",  ""),
+        "platform": ctx.get("platform", ""),
+
+        "is_win":   ctx.get("is_win",   str(IS_WIN).lower()),
+        "is_linux": ctx.get("is_linux", str(IS_LINUX).lower()),
+        "is_mac":   ctx.get("is_mac",   str(IS_MAC).lower()),
     }
     tpl.update(ctx.get("user_vars", {}))
     return tpl
@@ -2437,8 +2515,9 @@ class ModInstaller:
         "find_game_folder": "_step_find_game_folder",
         "detect_store":     "_step_detect_store",
         "read_file":        "_step_read_file",
-        # Управление переменными
+        # Управление переменными и счётчики
         "set_var":          "_step_set_var",
+        "increment":        "_step_increment",
         # Файловые операции
         "copy":             "_step_copy",
         "rename":           "_step_rename",
@@ -2458,18 +2537,64 @@ class ModInstaller:
     # Псевдо-действия управления потоком — обрабатываются в run() напрямую
     _FLOW_ACTIONS = {"if", "else", "elif", "end_if", "for", "end_for", "while", "end_while"}
 
-    def __init__(self, recipe: dict, mod_folder: str, log_cb, user_answers: dict = None):
+    def __init__(self, recipe: dict, mod_folder: str, log_cb,
+                 user_answers: dict = None, extra_ctx: dict = None):
         self.recipe       = recipe
         self.mod_folder   = mod_folder
         self.log          = log_cb
+
+        # ── Базовый контекст ──────────────────────────────────────────────────
+        # Всё что может понадобиться в шагах и conditions
         self.ctx = {
-            "game_folder":        "",
-            "mod_folder":         mod_folder,
-            "workshopdl_source":  True,
-            "store":              "",
-            "version":            "",
-            "user_vars":          user_answers or {},
+            # Источник
+            "workshopdl_source": True,      # мод всегда из SteamCMD Workshop
+
+            # Папки — заполняются шагами или из extra_ctx
+            "game_folder":   "",
+            "mod_folder":    mod_folder,
+            "steamcmd_root": "",            # корень steamcmd (родитель steamapps/)
+
+            # Идентификаторы
+            "game_id":   "",               # Steam App ID игры
+            "mod_id":    "",               # Steam Workshop ID текущего мода
+            "game_name": "",               # человекочитаемое название игры
+
+            # Магазин и версия (заполняются detect_store)
+            "store":   "",
+            "version": "",
+
+            # Платформа
+            "platform": "win" if IS_WIN else ("mac" if IS_MAC else "linux"),
+            "is_win":   str(IS_WIN).lower(),
+            "is_linux": str(IS_LINUX).lower(),
+            "is_mac":   str(IS_MAC).lower(),
+
+            # Системные пути
+            "USERPROFILE":  os.path.expanduser("~"),
+            "APPDATA":      os.environ.get("APPDATA", ""),
+            "LOCALAPPDATA": os.environ.get("LOCALAPPDATA", ""),
+            "PROGRAMFILES": os.environ.get("ProgramFiles", ""),
+            "PROGRAMFILES86": os.environ.get("ProgramFiles(x86)", ""),
+            "STEAM":        _find_steam_path(),
+
+            # Ответы пользователя на вопросы + set_var переменные
+            "user_vars": dict(user_answers or {}),
+
+            # Служебное
+            "_install_mode": "install",
         }
+
+        # Поверх базового — данные из вызывающего кода (game_id, mod_id, история и т.д.)
+        if extra_ctx:
+            for k, v in extra_ctx.items():
+                if k == "user_vars" and isinstance(v, dict):
+                    self.ctx["user_vars"].update(v)
+                else:
+                    self.ctx[k] = v
+
+        # Если game_folder пришёл из истории — записываем сразу
+        if self.ctx.get("game_folder"):
+            self.ctx["user_vars"].setdefault("game_folder", self.ctx["game_folder"])
 
     def run(self) -> bool:
         """Выполняет все шаги инструкции с поддержкой if/else/for/while."""
@@ -2610,41 +2735,76 @@ class ModInstaller:
         """
         for-loop по массиву.
         step:
-          var      — имя переменной итерации (default "item")
-          items    — список значений  ["a","b","c"]
+          var       — имя переменной итерации (default "item")
+          index_var — имя переменной-счётчика 0-based (default "{var}_index")
+          items     — список значений ["a","b","c"]
           items_var — имя переменной ctx содержащей список (альтернатива items)
+
+        Автоматически устанавливает:
+          {var}             — текущий элемент
+          {var}_index       — индекс 0-based (0, 1, 2 …)
+          {var}_number      — номер 1-based (1, 2, 3 …)
+          {var}_total       — общее число элементов
+          {var}_is_first    — "true" / "false"
+          {var}_is_last     — "true" / "false"
         """
         var_name  = step.get("var", "item")
+        idx_var   = step.get("index_var", f"{var_name}_index")
         items     = step.get("items")
         items_var = step.get("items_var", "")
+
         if items is None and items_var:
-            raw = self.ctx["user_vars"].get(items_var, "")
-            items = raw if isinstance(raw, list) else str(raw).split(",")
+            raw   = self.ctx["user_vars"].get(items_var, "")
+            items = raw if isinstance(raw, list) else [x.strip() for x in str(raw).split(",")]
         if not items:
             self.log(f"  ⚠ for: items пустой")
             return
-        for val in items:
-            self.ctx["user_vars"][var_name] = str(val).strip()
-            self.log(f"  🔁 for {var_name} = {val!r}")
+
+        total = len(items)
+        self._set_uv(f"{var_name}_total", str(total))
+
+        for idx, val in enumerate(items):
+            val_str = str(val).strip()
+            self._set_uv(var_name,            val_str)
+            self._set_uv(idx_var,             str(idx))
+            self._set_uv(f"{var_name}_number", str(idx + 1))
+            self._set_uv(f"{var_name}_is_first", "true" if idx == 0       else "false")
+            self._set_uv(f"{var_name}_is_last",  "true" if idx == total-1 else "false")
+            self.log(f"  🔁 for [{idx+1}/{total}] {var_name} = {val_str!r}")
             self._exec_steps(body)
 
     def _exec_while(self, step: dict, body: list):
         """
-        while-loop.
+        while-loop с автоматическим счётчиком итераций.
         step:
-          condition — выражение (тот же синтаксис что when)
-          max_iter  — защита от бесконечного цикла (default 100)
+          condition  — выражение (тот же синтаксис что when)
+          max_iter   — защита от бесконечного цикла (default 100)
+          index_var  — имя переменной-счётчика (default "while_index")
+
+        Автоматически устанавливает:
+          {index_var}        — индекс 0-based
+          {index_var}_number — номер 1-based
         """
         condition = step.get("condition", step.get("when", "False"))
         max_iter  = int(step.get("max_iter", 100))
+        idx_var   = step.get("index_var", "while_index")
         it = 0
         while _pf_safe_eval_condition(condition, self.ctx):
             if it >= max_iter:
                 self.log(f"  ⚠ while: достигнут лимит {max_iter} итераций, выходим")
                 break
+            self._set_uv(idx_var,              str(it))
+            self._set_uv(f"{idx_var}_number",  str(it + 1))
             self.log(f"  🔁 while итерация {it + 1}")
             self._exec_steps(body)
             it += 1
+
+    def _set_uv(self, key: str, value: str):
+        """Вспомогательный метод: записывает значение в user_vars и синхронизирует ctx."""
+        self.ctx["user_vars"][key] = value
+        _SYNC = {"game_folder", "store", "version", "game_id", "mod_id", "game_name"}
+        if key in _SYNC:
+            self.ctx[key] = value
 
     # ── Шаги ─────────────────────────────────────────────────────────────────
 
@@ -2653,35 +2813,80 @@ class ModInstaller:
         """
         Задаёт переменную в ctx["user_vars"].
         step:
-          vars: {"name": "value", ...}   — задать несколько сразу
-          name / value                   — задать одну
-          eval: "expression"             — вычислить как условие → "true"/"false"
+          vars: {"name": "value", ...}        — задать несколько сразу
+          name / value                         — задать одну
+          eval: "expression"                   — вычислить как условие → "true"/"false"
           concat: ["part1", "{var}", "part2"]  — склеить строки
+
+        Особые переменные (game_folder, store, version, game_id, mod_id, game_name)
+        автоматически синхронизируются в корень ctx и доступны в when-условиях.
         """
         tpl = self._tpl()
 
-        # Несколько переменных
+        def _apply(k: str, v: str):
+            self._set_uv(k, v)
+            # game_folder → сохраняем в историю
+            if k == "game_folder" and v and os.path.isdir(v) and self.ctx.get("game_id"):
+                history_set_game_folder(self.ctx["game_id"], v)
+
         for k, v in step.get("vars", {}).items():
             rendered = str(v).format(**tpl) if isinstance(v, str) else str(v)
-            self.ctx["user_vars"][k] = rendered
+            _apply(k, rendered)
             self.log(f"  📌 {k} = {rendered!r}")
 
-        # Одна переменная
         name = step.get("name", "")
         if name:
             if "eval" in step:
                 result = "true" if _pf_safe_eval_condition(step["eval"], self.ctx) else "false"
-                self.ctx["user_vars"][name] = result
+                _apply(name, result)
                 self.log(f"  📌 {name} = {result!r} (eval)")
             elif "concat" in step:
-                parts = [str(p).format(**tpl) for p in step["concat"]]
+                parts  = [str(p).format(**tpl) for p in step["concat"]]
                 result = "".join(parts)
-                self.ctx["user_vars"][name] = result
+                _apply(name, result)
                 self.log(f"  📌 {name} = {result!r} (concat)")
             else:
                 val = str(step.get("value", "")).format(**tpl)
-                self.ctx["user_vars"][name] = val
+                _apply(name, val)
                 self.log(f"  📌 {name} = {val!r}")
+        return True
+
+    # ── increment ─────────────────────────────────────────────────────────────
+    def _step_increment(self, step: dict) -> bool:
+        """
+        Инкрементирует / декрементирует числовую переменную.
+        step:
+          name  — имя переменной (обязательно)
+          by    — на сколько изменить (default 1, может быть отрицательным)
+          init  — начальное значение если переменная не задана (default 0)
+          log   — bool: писать в лог (default True)
+
+        Пример использования как счётчик обработанных файлов:
+          { "action": "increment", "name": "files_done" }
+          { "action": "increment", "name": "errors",     "by": 1 }
+          { "action": "increment", "name": "retry_left", "by": -1, "init": 3 }
+        """
+        name = step.get("name", "")
+        if not name:
+            self.log("  ⚠ increment: не задан name")
+            return False
+
+        by   = int(step.get("by",   1))
+        init = int(step.get("init", 0))
+        do_log = step.get("log", True)
+
+        cur_raw = self.ctx["user_vars"].get(name, str(init))
+        try:
+            cur = int(cur_raw)
+        except (ValueError, TypeError):
+            cur = init
+
+        new_val = cur + by
+        self._set_uv(name, str(new_val))
+
+        if do_log:
+            arrow = f"{cur} → {new_val}"
+            self.log(f"  🔢 {name}: {arrow}  (by {by:+d})")
         return True
 
     # ── find_game_folder ──────────────────────────────────────────────────────
@@ -2691,6 +2896,10 @@ class ModInstaller:
             self.ctx["game_folder"] = folder
             self.ctx["user_vars"]["game_folder"] = folder
             self.log(f"  📂 Папка игры найдена: {folder}")
+            # Сохраняем в историю чтобы следующий раз не искать
+            if self.ctx.get("game_id"):
+                history_set_game_folder(self.ctx["game_id"], folder)
+                self.log(f"  💾 Путь сохранён в историю для App ID {self.ctx['game_id']}")
             return True
         manual = step.get("manual_fallback")
         if manual:
@@ -2700,6 +2909,7 @@ class ModInstaller:
             return True
         self.log("  ⚠ Папка игры не найдена")
         return False
+
 
     # ── Шаг: detect_store ────────────────────────────────────────────────────
     def _step_detect_store(self, step: dict) -> bool:
@@ -2994,14 +3204,50 @@ class ModInstaller:
             return False
 
     def _tpl(self) -> dict:
-        """Шаблонные переменные для подстановки в путях."""
-        return {
-            "game_folder": self.ctx.get("game_folder", ""),
-            "mod_folder":  self.ctx.get("mod_folder", ""),
-            "store":       self.ctx.get("store", ""),
-            "version":     self.ctx.get("version", ""),
-            **self.ctx.get("user_vars", {}),
+        """
+        Словарь подстановок для format() в путях и значениях.
+        Порядок приоритетов (от низшего к высшему):
+          1. Системные пути (APPDATA, STEAM и т.д.) — из ctx напрямую
+          2. Идентификаторы игры/мода (game_id, mod_id, game_name)
+          3. Рабочие папки (game_folder, mod_folder, steamcmd_root)
+          4. Магазин и версия (store, version, platform)
+          5. user_vars — ответы пользователя и set_var; перекрывают всё выше
+        """
+        base = {
+            # Системные
+            "USERPROFILE":    self.ctx.get("USERPROFILE",  os.path.expanduser("~")),
+            "APPDATA":        self.ctx.get("APPDATA",      os.environ.get("APPDATA", "")),
+            "LOCALAPPDATA":   self.ctx.get("LOCALAPPDATA", os.environ.get("LOCALAPPDATA", "")),
+            "PROGRAMFILES":   self.ctx.get("PROGRAMFILES", os.environ.get("ProgramFiles", "")),
+            "PROGRAMFILES86": self.ctx.get("PROGRAMFILES86", os.environ.get("ProgramFiles(x86)", "")),
+            "STEAM":          self.ctx.get("STEAM",        _find_steam_path()),
+
+            # Идентификаторы
+            "game_id":   self.ctx.get("game_id",   ""),
+            "mod_id":    self.ctx.get("mod_id",    ""),
+            "game_name": self.ctx.get("game_name", ""),
+            # Счётчики модов
+            "mod_index":    self.ctx.get("mod_index",    "0"),
+            "mod_number":   self.ctx.get("mod_number",   "1"),
+            "mod_total":    self.ctx.get("mod_total",    "1"),
+            "mod_count":    self.ctx.get("mod_count",    "1"),
+            "mod_is_first": self.ctx.get("mod_is_first", "true"),
+            "mod_is_last":  self.ctx.get("mod_is_last",  "true"),
+
+            # Папки
+            "game_folder":    self.ctx.get("game_folder",    ""),
+            "mod_folder":     self.ctx.get("mod_folder",     ""),
+            "content_folder": self.ctx.get("content_folder", ""),
+            "steamcmd_root":  self.ctx.get("steamcmd_root",  ""),
+
+            # Магазин и версия
+            "store":    self.ctx.get("store",    ""),
+            "version":  self.ctx.get("version",  ""),
+            "platform": self.ctx.get("platform", ""),
         }
+        # user_vars в конце — перекрывают базовые если есть одноимённые
+        base.update(self.ctx.get("user_vars", {}))
+        return base
 
     def run_uninstall(self) -> bool:
         """Запускает блок uninstall из инструкции (если он есть)."""
@@ -3022,16 +3268,19 @@ class InstallWorker(QThread):
     mod_status = pyqtSignal(str, bool)  # mod_id, success
     finished   = pyqtSignal(int, int)   # success_count, fail_count
 
-    def __init__(self, recipe: dict, mod_folders: dict, user_answers: dict):
+    def __init__(self, recipe: dict, mod_folders: dict, user_answers: dict,
+                 extra_ctx: dict = None):
         """
-        recipe       — инструкция установки (один dict, общий для всех модов)
+        recipe       — инструкция установки
         mod_folders  — {mod_id: folder_path}
-        user_answers — ответы пользователя на вопросы
+        user_answers — ответы пользователя на вопросы (из InstallQuestionsDialog)
+        extra_ctx    — дополнительный контекст: game_id, game_name, game_folder из истории и т.д.
         """
         super().__init__()
         self.recipe       = recipe
         self.mod_folders  = mod_folders
         self.user_answers = user_answers
+        self.extra_ctx    = extra_ctx or {}
 
     def run(self):
         total   = len(self.mod_folders)
@@ -3039,17 +3288,55 @@ class InstallWorker(QThread):
         for i, (mod_id, folder) in enumerate(self.mod_folders.items(), 1):
             self.progress.emit(i - 1, total)
             self.log_line.emit(f"\n📦 [{i}/{total}] Установка мода {mod_id}...")
-            self.log_line.emit(f"   Папка: {folder}")
+            self.log_line.emit(f"   Папка мода: {folder}")
+
+            # Контекст специфичный для этого конкретного мода
+            per_mod_ctx = {
+                **self.extra_ctx,
+                # Идентификатор текущего мода
+                "mod_id": mod_id,
+                # Счётчики — доступны в шагах и when-условиях как {mod_index} и т.д.
+                "mod_index":    str(i - 1),   # 0-based: 0, 1, 2 …
+                "mod_number":   str(i),        # 1-based: 1, 2, 3 …
+                "mod_total":    str(total),    # всего модов в этой установке
+                "mod_is_first": "true" if i == 1     else "false",
+                "mod_is_last":  "true" if i == total else "false",
+            }
+
             installer = ModInstaller(
-                self.recipe, folder, self.log_line.emit, self.user_answers
+                self.recipe, folder,
+                self.log_line.emit,
+                user_answers=self.user_answers,
+                extra_ctx=per_mod_ctx,
             )
+
+            # Логируем ключевые поля контекста
+            ctx = installer.ctx
+            if ctx.get("game_id"):
+                self.log_line.emit(f"   App ID: {ctx['game_id']}  ({ctx.get('game_name', '')})")
+            if ctx.get("game_folder"):
+                self.log_line.emit(f"   Папка игры: {ctx['game_folder']}")
+            self.log_line.emit(
+                f"   Мод {i} из {total}"
+                + ("  [первый]" if i == 1 else "")
+                + ("  [последний]" if i == total else "")
+            )
+
             ok = installer.run()
+
+            # После установки — сохраняем game_folder в историю если появился
+            found_folder = installer.ctx.get("game_folder", "")
+            game_id_ctx  = installer.ctx.get("game_id", "")
+            if found_folder and game_id_ctx:
+                history_set_game_folder(game_id_ctx, found_folder)
+                self.log_line.emit(f"   💾 Путь к игре сохранён в историю")
+
             if ok:
                 success += 1
-                self.log_line.emit(f"  ✅ Мод {mod_id} установлен успешно")
+                self.log_line.emit(f"  ✅ Мод {mod_id} установлен успешно  [{i}/{total}]")
             else:
                 fail += 1
-                self.log_line.emit(f"  ❌ Мод {mod_id} — ошибка установки")
+                self.log_line.emit(f"  ❌ Мод {mod_id} — ошибка установки  [{i}/{total}]")
             self.mod_status.emit(mod_id, ok)
 
         self.progress.emit(total, total)
@@ -3066,22 +3353,27 @@ class InstallDialog(QDialog):
     3. Запускает InstallWorker и показывает прогресс + лог
     """
 
-    def __init__(self, recipe: dict, mod_folders: dict, parent=None):
+    def __init__(self, recipe: dict, mod_folders: dict, extra_ctx: dict = None, parent=None):
         super().__init__(parent)
         self.recipe      = recipe
-        self.mod_folders = mod_folders  # {mod_id: folder_path}
+        self.mod_folders = mod_folders
+        self.extra_ctx   = extra_ctx or {}
         self._worker     = None
         self._answers    = {}
 
-        game_name = recipe.get("game_name", "Игра")
+        game_name = recipe.get("game_name", self.extra_ctx.get("game_name", "Игра"))
+        game_id   = self.extra_ctx.get("game_id", "")
         self.setWindowTitle(f"📥 Установка модов — {game_name}")
-        self.setMinimumSize(640, 480)
+        self.setMinimumSize(640, 500)
 
         lay = QVBoxLayout(self)
 
-        # Заголовок
+        # Заголовок с контекстом
+        hist_folder = self.extra_ctx.get("game_folder", "")
+        folder_line = f"<br><b>Папка игры (из истории):</b> <code>{hist_folder}</code>" if hist_folder else ""
+        gameid_line = f"  <span style='color:#888'>App ID: {game_id}</span>" if game_id else ""
         info_text = (
-            f"<b>Игра:</b> {game_name}<br>"
+            f"<b>Игра:</b> {game_name}{gameid_line}{folder_line}<br>"
             f"<b>Описание:</b> {recipe.get('description', '—')}<br>"
             f"<b>Модов для установки:</b> {len(mod_folders)}"
         )
@@ -3147,7 +3439,10 @@ class InstallDialog(QDialog):
             self._log_append(f"✍ Ответы пользователя: {self._answers}")
 
         self._log_append("🚀 Установка началась...\n")
-        self._worker = InstallWorker(self.recipe, self.mod_folders, self._answers)
+        self._worker = InstallWorker(
+            self.recipe, self.mod_folders, self._answers,
+            extra_ctx=self.extra_ctx,
+        )
         self._worker.log_line.connect(self._log_append)
         self._worker.progress.connect(lambda c, t: self._progress.setValue(c))
         self._worker.mod_status.connect(self._on_mod_status)
@@ -4273,13 +4568,38 @@ class MainWindow(QMainWindow):
         if not recipe:
             return
 
-        # Спрашиваем пользователя
+        # ── Строим расширенный контекст ───────────────────────────────────────
+        game_name       = history_get_name(game_id)
+        history_folder  = history_get_game_folder(game_id)   # из истории если уже знаем
+        steamcmd_root   = os.path.dirname(self._get_steamcmd())  # папка steamcmd
+
+        extra_ctx = {
+            # Идентификаторы игры
+            "game_id":   game_id,
+            "game_name": game_name,
+
+            # Папки
+            "game_folder":   history_folder,   # "" если неизвестно — найдёт find_game_folder
+            "content_folder": content_folder,  # steamapps/workshop/content/<game_id>
+            "steamcmd_root": steamcmd_root,
+
+            # Системные пути (удобно в шаблонах)
+            "STEAM": _find_steam_path(),
+        }
+
+        # Если из истории есть папка игры — сразу показываем пользователю
+        if history_folder:
+            self._log(f"📂 Папка игры из истории: {history_folder}")
+        else:
+            self._log(f"ℹ Папка игры для {game_name} неизвестна — будет найдена при установке")
+
+        # ── Спрашиваем пользователя ───────────────────────────────────────────
+        hist_note = f"\n\n📂 Папка игры: {history_folder}" if history_folder else ""
         reply = QMessageBox.question(
-            self,
-            "📥 Установка модов",
+            self, "📥 Установка модов",
             f"Найдена инструкция установки для игры:\n"
-            f"<b>{recipe.get('game_name', game_id)}</b>\n\n"
-            f"{recipe.get('description', '')}\n\n"
+            f"<b>{game_name}</b>  (App ID: {game_id})\n\n"
+            f"{recipe.get('description', '')}{hist_note}\n\n"
             f"Установить скачанные моды прямо сейчас?",
             QMessageBox.Yes | QMessageBox.No
         )
@@ -4287,7 +4607,7 @@ class MainWindow(QMainWindow):
             self._log("⏭ Установка пропущена пользователем")
             return
 
-        # Собираем папки скачанных модов
+        # ── Собираем папки модов ──────────────────────────────────────────────
         mod_ids = [self.mod_list.item(i).text() for i in range(self.mod_list.count())]
         mod_folders = {}
         for mid in mod_ids:
@@ -4295,7 +4615,6 @@ class MainWindow(QMainWindow):
             if os.path.isdir(candidate):
                 mod_folders[mid] = candidate
             else:
-                # Ищем рекурсивно — steamcmd может создавать подпапки
                 for dirpath, dirs, _ in os.walk(content_folder):
                     if os.path.basename(dirpath) == mid:
                         mod_folders[mid] = dirpath
@@ -4306,10 +4625,16 @@ class MainWindow(QMainWindow):
             return
 
         self._log(f"📂 Найдено {len(mod_folders)} папок модов для установки")
-        dlg = InstallDialog(recipe, mod_folders, parent=self)
+
+        # Добавляем список mod_id и счётчики в контекст
+        # (mod_index / mod_number / mod_total выставляются per-мод в InstallWorker)
+        extra_ctx["mod_ids_list"] = list(mod_folders.keys())
+        extra_ctx["mod_total"]    = str(len(mod_folders))
+        extra_ctx["mod_count"]    = str(len(mod_folders))   # синоним для удобства
+
+        dlg = InstallDialog(recipe, mod_folders, extra_ctx=extra_ctx, parent=self)
         dlg.exec_()
 
-        # Добавляем итог в основной лог
         self._log("\n" + "─" * 50)
         self._log("Лог установки доступен в окне установщика выше.")
 
