@@ -1,152 +1,125 @@
 {
-  "game_id": "784150",
-  "game_name": "Workers & Resources: Soviet Republic",
-  "description": "Установка модов Workshop",
-  "version": "1",
-
-  "questions": [
-    {
-      "id": "GAME_PATH",
-      "type": "text",
-      "label": "Укажите путь к игре",
-      "default": "",
-      "hint": "Папка где находится SovietRepublic.exe"
-    }
-  ],
-
-  "steps": [
-    {
-      "action": "set_var",
-      "name": "game_folder",
-      "value": "{GAME_PATH}"
-    },
-
-    {
-      "action": "detect_store",
-      "label": "Определяем магазин",
-      "hints": {
-        "gog": [
-          "gog.ico",
-          "goggame-*.ico",
-          "goggame-*.dll",
-          "goggame-*.info"
-        ]
-      }
-    },
-
-    {
-      "action": "if",
-      "when": "store == 'gog'"
-    },
-
-      {
-        "action": "set_var",
-        "name": "mods_dir",
-        "value": "{game_folder}/media_soviet/workshop_wip"
-      },
-
-    {
-      "action": "else"
-    },
-
-      {
-        "action": "set_var",
-        "name": "mods_dir",
-        "value": "{game_folder}/media_soviet/workshop"
-      },
-
-    {
-      "action": "end_if"
-    },
-
-    {
-      "action": "if",
-      "when": "dir_exists('{mods_dir}/{mod_id}')"
-    },
-
-      {
-        "action": "set_var",
-        "name": "mod_installed",
-        "value": "true"
-      },
-
-    {
-      "action": "else"
-    },
-
-      {
-        "action": "copy",
-        "label": "Копируем мод",
-        "src": "{mod_folder}",
-        "dst": "{mods_dir}/{mod_id}",
-        "files": [
-          {
-            "from": "**",
-            "to": "."
-          }
-        ]
-      },
-
-    {
-      "action": "end_if"
-    }
-  ],
-
-  "uninstall": [
-    {
-      "action": "set_var",
-      "name": "game_folder",
-      "value": "{GAME_PATH}"
-    },
-
-    {
-      "action": "detect_store",
-      "hints": {
-        "gog": [
-          "gog.ico",
-          "goggame-*.ico",
-          "goggame-*.dll",
-          "goggame-*.info"
-        ]
-      }
-    },
-
-    {
-      "action": "if",
-      "when": "store == 'gog'"
-    },
-
-      {
-        "action": "set_var",
-        "name": "mods_dir",
-        "value": "{game_folder}/media_soviet/workshop_wip"
-      },
-
-    {
-      "action": "else"
-    },
-
-      {
-        "action": "set_var",
-        "name": "mods_dir",
-        "value": "{game_folder}/media_soviet/workshop"
-      },
-
-    {
-      "action": "end_if"
-    },
-
-    {
-      "action": "delete",
-      "label": "Удаляем мод",
-      "base": "{mods_dir}",
-      "rules": [
+    "game_id": "784150",
+    "game_name": "Workers & Resources: Soviet Republic",
+    "description": "Установка Workshop-модов",
+    "version": "1",
+    "questions": [
         {
-          "glob": "{mod_id}/",
-          "recursive": true,
-          "missing_ok": true
+            "id": "GAME_PATH",
+            "type": "text",
+            "browse": "folder",
+            "label": "Путь к папке {game_name}",
+            "default": "{game_folder}",
+            "placeholder": "Например: C:/Games/{game_name}",
+            "hint": "Папка где находится SovietRepublic.exe"
         }
-      ]
-    }
-  ]
+    ],
+    "steps": [
+        {
+            "action": "set_var",
+            "label": "Определяем папку игры",
+            "name": "game_folder",
+            "value": "{GAME_PATH}",
+            "when": "var_set('GAME_PATH')"
+        },
+        {
+            "action": "set_var",
+            "label": "Проверяем GOG версию",
+            "name": "is_gog",
+            "eval": "file_exists('{game_folder}/gog.ico')"
+        },
+        {
+            "action": "if",
+            "when": "is_gog == 'true'"
+        },
+        {
+            "action": "set_var",
+            "name": "mods_dir",
+            "value": "{game_folder}/media_soviet/workshop_wip"
+        },
+        {
+            "action": "else"
+        },
+        {
+            "action": "set_var",
+            "name": "mods_dir",
+            "value": "{game_folder}/media_soviet/workshop"
+        },
+        {
+            "action": "end_if"
+        },
+        {
+            "action": "if",
+            "when": "dir_exists('{mods_dir}/{mod_id}')"
+        },
+        {
+            "action": "set_var",
+            "label": "Мод уже установлен",
+            "name": "mod_installed",
+            "value": "true"
+        },
+        {
+            "action": "else"
+        },
+        {
+            "action": "copy",
+            "label": "Копируем мод",
+            "src": "{mod_folder}",
+            "dst": "{mods_dir}/{mod_id}",
+            "files": [
+                {
+                    "from": "**",
+                    "to": "."
+                }
+            ]
+        },
+        {
+            "action": "end_if"
+        }
+    ],
+    "uninstall": [
+        {
+            "action": "set_var",
+            "name": "game_folder",
+            "value": "{GAME_PATH}",
+            "when": "var_set('GAME_PATH')"
+        },
+        {
+            "action": "set_var",
+            "name": "is_gog",
+            "eval": "file_exists('{game_folder}/gog.ico')"
+        },
+        {
+            "action": "if",
+            "when": "is_gog == 'true'"
+        },
+        {
+            "action": "set_var",
+            "name": "mods_dir",
+            "value": "{game_folder}/media_soviet/workshop_wip"
+        },
+        {
+            "action": "else"
+        },
+        {
+            "action": "set_var",
+            "name": "mods_dir",
+            "value": "{game_folder}/media_soviet/workshop"
+        },
+        {
+            "action": "end_if"
+        },
+        {
+            "action": "delete",
+            "label": "Удаляем мод",
+            "base": "{mods_dir}",
+            "rules": [
+                {
+                    "glob": "{mod_id}/",
+                    "recursive": true,
+                    "missing_ok": true
+                }
+            ]
+        }
+    ]
 }
