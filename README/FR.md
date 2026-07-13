@@ -25,10 +25,10 @@ Inspired by the original [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL
 | Langage | Fichier |
 |---|---|
 | 🇬🇧 English | [README.md](../README.md) ← you are here |
-| 🇩🇪 Deutsch | [README_DE.md](../README/README_DE.md) |
-| 🇫🇷 Français | [README_FR.md](../README/README_FR.md) |
-| 🇷🇺 Русский | [README_RU.md](../README/README_RU.md) |
-| 🇨🇳 中文 | [README_ZH.md](../README/README_ZH.md) |
+| 🇩🇪 Deutsch | [README_DE.md](../README/DE.md) |
+| 🇫🇷 Français | [README_FR.md](../README/FR.md) |
+| 🇷🇺 Русский | [README_RU.md](../README/RU.md) |
+| 🇨🇳 中文 | [README_ZH.md](../README/ZH.md) |
 
 > Tu veut voir ta langue? lis la section [Traductions](#-Traductions) section below.
 
