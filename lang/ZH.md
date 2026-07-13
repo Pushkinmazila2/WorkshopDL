@@ -18,7 +18,7 @@
 
 | 语言 | 文件 |
 |---|---|
-| 🇬🇧 English | [README.md](README.md) |
+| 🇬🇧 English | [README.md](../README.md) |
 | 🇩🇪 Deutsch | [README_DE.md](README/README_DE.md) |
 | 🇫🇷 Français | [README_FR.md](README/README_FR.md) |
 | 🇷🇺 Русский | [README_RU.md](README/README_RU.md) |
