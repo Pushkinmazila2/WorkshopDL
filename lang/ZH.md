@@ -18,11 +18,11 @@
 
 | 语言 | 文件 |
 |---|---|
-| 🇬🇧 English | [README.md](README.md) |
-| 🇩🇪 Deutsch | [README_DE.md](README_DE.md) |
-| 🇫🇷 Français | [README_FR.md](README_FR.md) |
-| 🇷🇺 Русский | [README_RU.md](README_RU.md) |
-| 🇨🇳 中文 | [README_ZH.md](README_ZH.md) ← 当前页面 |
+| 🇬🇧 English | [README.md](../README.md) |
+| 🇩🇪 Deutsch | [README_DE.md](../README/DE.md) |
+| 🇫🇷 Français | [README_FR.md](../README/FR.md) |
+| 🇷🇺 Русский | [README_RU.md](../README/RU.md) |
+| 🇨🇳 中文 | [README_ZH.md](../README/ZH.md) ← 当前页面 |
 
 > 想添加您的语言？请参阅下方[翻译](#-翻译)部分。
 
