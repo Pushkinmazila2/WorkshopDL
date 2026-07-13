@@ -19,8 +19,9 @@
 | Язык | Файл |
 |---|---|
 | 🇬🇧 English | [README.md](README.md) |
-| 🇷🇺 Русский | [README_RU.md](README_RU.md) ← вы здесь |
 | 🇩🇪 Deutsch | [README_DE.md](README_DE.md) |
+| 🇫🇷 Français | [README_FR.md](README_FR.md) |
+| 🇷🇺 Русский | [README_RU.md](README_RU.md) ← вы здесь |
 | 🇨🇳 中文 | [README_ZH.md](README_ZH.md) |
 
 > Хотите добавить свой язык? Смотрите раздел [Переводы](#-переводы).

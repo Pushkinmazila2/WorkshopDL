@@ -19,8 +19,9 @@ Inspiriert vom originalen [WorkshopDL](https://github.com/imwaitingnow/WorkshopD
 | Sprache | Datei |
 |---|---|
 | 🇬🇧 English | [README.md](README.md) |
-| 🇷🇺 Русский | [README_RU.md](README_RU.md) |
 | 🇩🇪 Deutsch | [README_DE.md](README_DE.md) ← Sie sind hier |
+| 🇫🇷 Français | [README_FR.md](README_FR.md) |
+| 🇷🇺 Русский | [README_RU.md](README_RU.md) |
 | 🇨🇳 中文 | [README_ZH.md](README_ZH.md) |
 
 > Möchten Sie eine neue Sprache hinzufügen? Siehe Abschnitt [Übersetzungen](#-übersetzungen).
@@ -135,7 +136,7 @@ Es werden keine Dateien gelöscht.
 
 Alle UI-Texte befinden sich in einer einzigen JSON-Datei. So erstellen Sie eine neue Übersetzung:
 
-1. `lang_en.json` kopieren und umbenennen, z. B. in `lang_fr.json`
+1. `lang_en.json` kopieren und umbenennen, z. B. in `lang_de.json`
 2. Die **Werte** (rechte Seite jeder Zeile) übersetzen — Schlüssel nicht ändern
 3. In **Einstellungen → Sprache** zur Datei navigieren und **✅ Übernehmen** klicken
 
