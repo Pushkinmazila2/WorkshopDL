@@ -19,10 +19,10 @@ Inspiriert vom originalen [WorkshopDL](https://github.com/imwaitingnow/WorkshopD
 | Sprache | Datei |
 |---|---|
 | 🇬🇧 English | [README.md](../README.md) |
-| 🇩🇪 Deutsch | [README_DE.md](../README/README_DE.md) ← Sie sind hier |
-| 🇫🇷 Français | [README_FR.md](../README/README_FR.md) |
-| 🇷🇺 Русский | [README_RU.md](../README/README_RU.md) |
-| 🇨🇳 中文 | [README_ZH.md](../README/README_ZH.md) |
+| 🇩🇪 Deutsch | [README_DE.md](../README/DE.md) ← Sie sind hier |
+| 🇫🇷 Français | [README_FR.md](../README/FR.md) |
+| 🇷🇺 Русский | [README_RU.md](../README/RU.md) |
+| 🇨🇳 中文 | [README_ZH.md](../README/ZH.md) |
 
 > Möchten Sie eine neue Sprache hinzufügen? Siehe Abschnitt [Übersetzungen](#-übersetzungen).
 
