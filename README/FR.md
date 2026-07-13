@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/Licence-MIT-orange)
 
 **Un téléchargeur de mods du Steam Workshop multiplateforme avec une interface graphique épurée.**  
-Inspired by the original [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL) by imwaitingnow.
+Inspiré par [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL) de imwaitingnow.
 
 </div>
 
