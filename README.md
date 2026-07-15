@@ -25,8 +25,9 @@ Inspired by the original [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL
 | Language | File |
 |---|---|
 | 🇬🇧 English | [README.md](README.md) ← you are here |
-| 🇷🇺 Русский | [README_RU.md](README/RU.md) |
 | 🇩🇪 Deutsch | [README_DE.md](README/DE.md) |
+| 🇫🇷 Français | [README_FR.md](README/FR.md) |
+| 🇷🇺 Русский | [README_RU.md](README/RU.md) |
 | 🇨🇳 中文 | [README_ZH.md](README/ZH.md) |
 
 > Want to add your language? See the [Translations](#-translations) section below.
@@ -94,6 +95,7 @@ WorkshopDL/
 ├── lang/                # Lang (опционально)
 │   ├── de.json
 │   ├── en.json         # Английская локализация (по умолчанию
+│   ├── fr.json
 │   ├── ru.json         # Русская локализация
 │   └── zh.json
 ├── Modules/             # Runtime data (auto-created)
@@ -150,7 +152,7 @@ No files are deleted. Your game will ignore `.disabled` folders
 
 All UI strings live in a single JSON file. To create a new translation:
 
-1. Copy `lang_en.json` and rename it, e.g. `lang_fr.json`
+1. Copy `lang_en.json` and rename it, e.g. `lang_de.json`
 2. Translate the **values** (right side of each line) — do not change the keys
 3. In **Settings → Language**, browse to your file and click **✅ Apply**
 

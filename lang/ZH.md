@@ -18,10 +18,11 @@
 
 | 语言 | 文件 |
 |---|---|
-| 🇬🇧 English | [README.md](README.md) |
-| 🇷🇺 Русский | [README_RU.md](README_RU.md) |
-| 🇩🇪 Deutsch | [README_DE.md](README_DE.md) |
-| 🇨🇳 中文 | [README_ZH.md](README_ZH.md) ← 当前页面 |
+| 🇬🇧 English | [README.md](../README.md) |
+| 🇩🇪 Deutsch | [README_DE.md](../README/DE.md) |
+| 🇫🇷 Français | [README_FR.md](../README/FR.md) |
+| 🇷🇺 Русский | [README_RU.md](../README/RU.md) |
+| 🇨🇳 中文 | [README_ZH.md](../README/ZH.md) ← 当前页面 |
 
 > 想添加您的语言？请参阅下方[翻译](#-翻译)部分。
 
@@ -135,7 +136,7 @@ WorkshopDL 将本地文件夹的修改时间与 Steam API 的 `time_updated` 字
 
 所有界面字符串均存储在单个 JSON 文件中。创建新翻译的步骤：
 
-1. 复制 `lang_en.json` 并重命名，例如 `lang_fr.json`
+1. 复制 `lang_en.json` 并重命名，例如 `lang_de.json`
 2. 翻译**值**（每行的右侧）— 不要修改键名
 3. 在 **设置 → 语言** 中浏览到该文件，点击 **✅ 应用**
 
