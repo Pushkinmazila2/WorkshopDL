@@ -14,10 +14,10 @@ Inspiré par [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL) de imwaiti
 
 ---
 ## ⬇ Écran de téléchargement
-<img src="screen/FR/FR_mods_downloader.png" width="600">
+<img src="../screen/FR/FR_mods_downloader.png" width="600">
 
 ## 🔄 Mod Manager
-<img src="screen/FR/FR_mods_manager.png" width="600">
+<img src="../screen/FR/FR_mods_manager.png" width="600">
 ---
 
 ## 🌐 Traductions du README
