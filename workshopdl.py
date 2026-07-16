@@ -382,17 +382,27 @@ class SteamCMDInstallWorker(QThread):
         archive_path = os.path.join(dest_dir, archive_name)
         try:
             os.makedirs(dest_dir, exist_ok=True)
-
+          
             # ── Шаг 1: скачать bootstrapper ───────────────────────────────────
             self.status.emit(t("steamcmd_dl_downloading"))
             self.percent.emit(0)
-
-            def reporthook(count, block, total):
-                if total > 0:
-                    pct = min(int(count * block * 100 / total), 30)
-                    self.percent.emit(pct)
-
-            urllib.request.urlretrieve(STEAMCMD_DL_URL, archive_path, reporthook)
+            
+            # Добавляем User-Agent, чтобы Valve не блокировала запрос
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            
+            with requests.get(STEAMCMD_DL_URL, headers=headers, stream=True, timeout=15) as r:
+                r.raise_for_status()
+                total_size = int(r.headers.get('content-length', 0))
+                downloaded = 0
+                
+                with open(archive_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                pct = min(int(downloaded * 30 / total_size), 30)
+                                self.percent.emit(pct)
 
             # ── Шаг 2: распаковать ────────────────────────────────────────────
             self.status.emit(t("steamcmd_dl_unpacking"))
