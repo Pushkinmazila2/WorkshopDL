@@ -386,32 +386,43 @@ class SteamCMDInstallWorker(QThread):
             # ── Шаг 1: скачать bootstrapper ───────────────────────────────────
             self.status.emit(t("steamcmd_dl_downloading"))
             self.percent.emit(0)
-
+    
+            try:
+                os.makedirs(os.path.dirname(archive_path), exist_ok=True)
+            except Exception as e:
+                self.error.emit(f"Failed to create directory: {str(e)}")
+                return
+    
             req = urllib.request.Request(
                 STEAMCMD_DL_URL, 
                 headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
             )
     
             try:
-                with urllib.request.urlopen(req, timeout=15) as response, open(archive_path, 'wb') as out_file:
+                with urllib.request.urlopen(req, timeout=15) as response:
                     total_size = int(response.headers.get('Content-Length', 0))
                     downloaded = 0
-                    block_size = 8192
+                    block_size = 65536  # Буфер 64КБ для быстрой работы на всех ОС
                     
-                    while True:
-                        buffer = response.read(block_size)
-                        if not buffer:
-                            break
-                        downloaded += len(buffer)
-                        out_file.write(buffer)
-                        
-                        if total_size > 0:
-                           
-                            pct = min(int(downloaded * 30 / total_size), 30)
-                            self.percent.emit(pct)
+                    with open(archive_path, 'wb') as out_file:
+                        while True:
+                            buffer = response.read(block_size)
+                            if not buffer:
+                                break
+                            downloaded += len(buffer)
+                            out_file.write(buffer)
+                            
+                            if total_size > 0:
+                                # Масштабируем прогресс скачивания от 0% до 30%
+                                pct = min(int(downloaded * 30 / total_size), 30)
+                                self.percent.emit(pct)
+                            else:
+                                self.percent.emit(15)  # Заглушка, если сервер не вернул размер
+                                
             except Exception as e:
                 self.error.emit(f"Download failed: {str(e)}")
                 return
+
 
             # ── Шаг 2: распаковать ────────────────────────────────────────────
             self.status.emit(t("steamcmd_dl_unpacking"))
