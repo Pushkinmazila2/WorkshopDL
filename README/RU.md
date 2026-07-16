@@ -18,10 +18,11 @@
 
 | Язык | Файл |
 |---|---|
-| 🇬🇧 English | [README.md](README.md) |
-| 🇷🇺 Русский | [README_RU.md](README_RU.md) ← вы здесь |
-| 🇩🇪 Deutsch | [README_DE.md](README_DE.md) |
-| 🇨🇳 中文 | [README_ZH.md](README_ZH.md) |
+| 🇬🇧 English | [README.md](../README.md) |
+| 🇩🇪 Deutsch | [README_DE.md](../README/DE.md) |
+| 🇫🇷 Français | [README_FR.md](../README/FR.md) |
+| 🇷🇺 Русский | [README_RU.md](../README/RU.md) ← вы здесь |
+| 🇨🇳 中文 | [README_ZH.md](../README/ZH.md) |
 
 > Хотите добавить свой язык? Смотрите раздел [Переводы](#-переводы).
 
