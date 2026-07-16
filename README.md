@@ -39,6 +39,7 @@ Inspired by the original [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL
 - **⬇ Download mods** via SteamCMD — single mod or entire lists
 - **📦 Import Steam collections** — paste a collection URL and get all mods at once
 - **🔍 Auto Game ID detection** — just paste a Mod ID, the Game ID fills itself
+- **📥 Auto Instail** — installs mods automatically using provided instructions, or you can write your own.
 - **🔄 Update checker** — scan a local mods folder, see which are outdated vs up-to-date
 - **⏸ Pause & resume** — stop mid-queue and continue on next launch
 - **🔘 Enable / Disable mods** — toggle mods on/off without deleting (renames folder to `.disabled`)
