@@ -39,6 +39,7 @@ Inspiré par [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL) de imwaiti
 - **⬇ Téléchargement de mods** via SteamCMD — mod unique ou listes entières
 - **📦 Importation de collections Steam** — collez l'URL d'une collection pour récupérer tous les mods d'un coup
 - **🔍 Détection automatique de l'ID du jeu** — collez simplement l'ID d'un mod (PublishedFileID), l'ID du jeu (AppID) se remplit tout seul
+- **📥 Installation automatique** — installe les mods automatiquement selon les instructions fournies, ou vous pouvez écrire les vôtres.
 - **🔄 Vérificateur de mises à jour** — scannez un dossier local de mods pour voir lesquels sont obsolètes ou à jour
 - **⏸ Pause et reprise** — arrêtez-vous en plein milieu de la file d'attente et reprenez au prochain lancement
 - **🔘 Activer / Désactiver des mods** — activez ou désactivez vos mods sans les supprimer (renomme le dossier en `.disabled`)
