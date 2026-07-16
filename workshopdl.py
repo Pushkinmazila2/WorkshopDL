@@ -417,12 +417,18 @@ class SteamCMDInstallWorker(QThread):
             self.percent.emit(35)
             self.log_line.emit("─── SteamCMD self-update ───")
 
+            import os
+            clean_env = os.environ.copy()
+            clean_env.pop("LD_LIBRARY_PATH", None)
+            clean_env.pop("LD_PRELOAD", None)
+
             flags = subprocess.CREATE_NO_WINDOW if IS_WIN else 0
             proc = subprocess.Popen(
                 [exe_path, "+quit"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace",
-                creationflags=flags
+                creationflags=flags,
+                env=clean_env
             )
 
             import re as _re
@@ -554,11 +560,19 @@ class DownloadWorker(QThread):
 
         results = {mid: False for mid in mod_ids}
         try:
+            # Очищаем "отравленные" переменные PyInstaller для Linux
+            import os
+            clean_env = os.environ.copy()
+            clean_env.pop("LD_LIBRARY_PATH", None)
+            clean_env.pop("LD_PRELOAD", None)
+
             flags = subprocess.CREATE_NO_WINDOW if IS_WIN else 0
             proc  = subprocess.Popen(
                 args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace", creationflags=flags
+                text=True, encoding="utf-8", errors="replace", creationflags=flags,
+                env=clean_env
             )
+
             for line in proc.stdout:
                 line = line.rstrip()
                 if line: self.log_line.emit(line)
