@@ -34,6 +34,7 @@ Inspiriert vom originalen [WorkshopDL](https://github.com/imwaitingnow/WorkshopD
 - **📦 Steam-Sammlungen importieren** — URL einfügen und alle Mods werden automatisch hinzugefügt
 - **🔍 Automatische Game-ID-Erkennung** — einfach Mod-ID einfügen, Game-ID wird gefunden
 - **🔄 Update-Prüfung** — lokalen Mod-Ordner scannen und veraltete Mods anzeigen
+- **📥 Automatische Installation** — installiert Mods automatisch nach vorgegebenen Anweisungen, или Sie können eigene erstellen.
 - **⏸ Pause & Fortsetzen** — Download stoppen und beim nächsten Start fortsetzen
 - **🔘 Mods aktivieren / deaktivieren** — ohne Löschen umschalten (Ordner wird in `.disabled` umbenannt)
 - **📋 Spielverlauf** — merkt sich alle Spiele, für die Mods heruntergeladen wurden
