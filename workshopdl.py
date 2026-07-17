@@ -390,7 +390,7 @@ class SteamCMDInstallWorker(QThread):
             try:
                 os.makedirs(os.path.dirname(archive_path), exist_ok=True)
             except Exception as e:
-                self.error.emit(f"Failed to create directory: {str(e)}")
+                self.done.emit(False, f"Failed to create directory: {str(e)}")
                 return
     
             req = urllib.request.Request(
@@ -420,7 +420,7 @@ class SteamCMDInstallWorker(QThread):
                                 self.percent.emit(15)  # Заглушка, если сервер не вернул размер
                                 
             except Exception as e:
-                self.error.emit(f"Download failed: {str(e)}")
+                self.done.emit(False, f"Download failed: {str(e)}")
                 return
 
 
