@@ -3768,8 +3768,8 @@ class MainWindow(QMainWindow):
         self.cmb_update_paths.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.cmb_update_paths.lineEdit().setPlaceholderText(t("upd_path_placeholder"))
         rp.addWidget(self.cmb_update_paths)
-        for icon, tip, slot in [("📁", "Обзор папки",        self._browse_update_path),
-                                 ("✖",  "Удалить этот путь", self._delete_update_path)]:
+        for icon, tip, slot in [(t("btn_browse"), t("btn_browse_tip"),        self._browse_update_path),
+                                 (t("btn_delete_path"),  t("btn_delete_path_tip"), self._delete_update_path)]:
             b = QPushButton(icon); b.setFixedWidth(34); b.setToolTip(tip)
             b.clicked.connect(slot); rp.addWidget(b)
         gp.addLayout(rp); lay.addWidget(grp_path)
@@ -3920,14 +3920,14 @@ class MainWindow(QMainWindow):
         row_cmb = QHBoxLayout()
         self.cmb_lang = QComboBox()
         self.cmb_lang.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.cmb_lang.setToolTip("Языки с GitHub — нажми ⟳ чтобы обновить список")
+        self.cmb_lang.setToolTip(t("settings_language_set_tip"))
         row_cmb.addWidget(self.cmb_lang)
-        self.btn_lang_refresh = QPushButton("⟳")
+        self.btn_lang_refresh = QPushButton(t("settings_language_refresh"))
         self.btn_lang_refresh.setFixedWidth(34)
-        self.btn_lang_refresh.setToolTip("Обновить список языков с GitHub")
+        self.btn_lang_refresh.setToolTip(t("settings_language_refresh_tip"))
         self.btn_lang_refresh.clicked.connect(self._fetch_lang_list)
         row_cmb.addWidget(self.btn_lang_refresh)
-        self.btn_lang_dl = QPushButton("⬇ Скачать")
+        self.btn_lang_dl = QPushButton(t("settings_language_download"))
         self.btn_lang_dl.setFixedWidth(90)
         self.btn_lang_dl.clicked.connect(self._download_selected_lang)
         row_cmb.addWidget(self.btn_lang_dl)
@@ -3938,7 +3938,7 @@ class MainWindow(QMainWindow):
         gl2.addLayout(row_cmb)
 
         # Статус
-        self.lbl_lang_status = QLabel("  ⟳ Нажмите ⟳ чтобы загрузить список языков с GitHub")
+        self.lbl_lang_status = QLabel(t("settings_language_download_label"))
         self.lbl_lang_status.setStyleSheet("color: #888;")
         gl2.addWidget(self.lbl_lang_status)
 
@@ -3963,40 +3963,33 @@ class MainWindow(QMainWindow):
         btn_save.clicked.connect(self._save_settings)
 
         # ── Зависимости и загрузка ────────────────────────────────────────────
-        grp_deps = QGroupBox("🔗 Зависимости и загрузка")
+        grp_deps = QGroupBox(t("settings_dependency_group"))
         gd = QVBoxLayout(grp_deps)
 
         # Поведение зависимостей
-        gd.addWidget(QLabel("Что делать если у мода есть незагруженные зависимости:"))
+        gd.addWidget(QLabel(t("settings_dependency_label")))
         self.cmb_deps_behavior = QComboBox()
-        self.cmb_deps_behavior.addItem("❓ Всегда спрашивать",       userData="ask")
-        self.cmb_deps_behavior.addItem("⬇ Скачивать автоматически",  userData="auto")
-        self.cmb_deps_behavior.addItem("🚫 Всегда пропускать",       userData="skip")
+        self.cmb_deps_behavior.addItem(t("settings_dependency_ask"),       userData="ask")
+        self.cmb_deps_behavior.addItem(t("settings_dependency_auto"),  userData="auto")
+        self.cmb_deps_behavior.addItem(t("settings_dependency_skip"),       userData="skip")
         gd.addWidget(self.cmb_deps_behavior)
 
         # Размер пачки
         row_batch = QHBoxLayout()
-        row_batch.addWidget(QLabel("Размер пачки (модов за 1 сессию SteamCMD):"))
+        row_batch.addWidget(QLabel(t("settings_download_batch_label")))
         self.spn_batch = QSpinBox()
         self.spn_batch.setRange(1, 50)
         self.spn_batch.setValue(1)
         self.spn_batch.setFixedWidth(70)
-        self.spn_batch.setToolTip(
-            "1 = один мод за раз (безопаснее, подробный лог)\n"
-            "5–10 = меньше переподключений, быстрее при большом списке\n"
-            "Не влияет на скорость интернета — только на число сессий SteamCMD"
-        )
+        self.spn_batch.setToolTip(t("settings_download_batch_tip"))
         row_batch.addWidget(self.spn_batch)
         row_batch.addStretch()
         gd.addLayout(row_batch)
 
         # Очистка кеша
         row_cache = QHBoxLayout()
-        self.btn_clear_cache = QPushButton("🧹 Очистить кеш SteamCMD")
-        self.btn_clear_cache.setToolTip(
-            "Удаляет steamcmd/userdata/ и steamcmd/steamapps/\n"
-            "Помогает если моды перестали скачиваться без причины"
-        )
+        self.btn_clear_cache = QPushButton(t("settings_download_cache_clear"))
+        self.btn_clear_cache.setToolTip(t("settings_download_cache_clear_tip"))
         self.btn_clear_cache.clicked.connect(self._clear_steamcmd_cache)
         row_cache.addWidget(self.btn_clear_cache)
         self.lbl_cache_status = QLabel("")
@@ -4007,44 +4000,32 @@ class MainWindow(QMainWindow):
         lay.addWidget(grp_deps)
 
         # ── Репозиторий инструкций установки ─────────────────────────────────
-        grp_inst = QGroupBox("📥 Репозиторий инструкций установки модов")
+        grp_inst = QGroupBox(t("settings_install_group"))
         gi = QVBoxLayout(grp_inst)
-        gi.addWidget(QLabel(
-            "Формат: <b>owner/repo</b> или <b>owner/repo/tree/branch/folder</b><br>"
-            f"По умолчанию: <code>{INSTALL_REPO_DEFAULT}</code> → папка <code>{INSTALL_PATH_DEFAULT}/</code>"
-        ))
+        gi.addWidget(QLabel(t("settings_install_label").format(repo=INSTALL_REPO_DEFAULT, path=INSTALL_PATH_DEFAULT)))
         row_repo = QHBoxLayout()
         self.inp_install_repo = QLineEdit()
         self.inp_install_repo.setPlaceholderText(
             f"{INSTALL_REPO_DEFAULT}/{INSTALL_PATH_DEFAULT}"
         )
-        self.inp_install_repo.setToolTip(
-            "Репозиторий GitHub с JSON-инструкциями установки.\n"
-            "Файлы должны быть: <папка>/<game_id>.json\n"
-            "Примеры:\n"
-            "  Pushkinmazila2/WorkshopDL\n"
-            "  MyOrg/MyRepo/tree/main/game-installers"
-        )
+        self.inp_install_repo.setToolTip(t("settings_install_repo_tip"))
         row_repo.addWidget(self.inp_install_repo)
-        self.btn_repo_test = QPushButton("🔍 Проверить")
+        self.btn_repo_test = QPushButton(t("settings_install_repo_check"))
         self.btn_repo_test.setFixedWidth(100)
         self.btn_repo_test.clicked.connect(self._test_install_repo)
         row_repo.addWidget(self.btn_repo_test)
-        btn_repo_reset = QPushButton("↺ По умолч.")
+        btn_repo_reset = QPushButton(t("settings_install_repo_reset"))
         btn_repo_reset.setFixedWidth(90)
         btn_repo_reset.clicked.connect(lambda: self.inp_install_repo.clear())
         row_repo.addWidget(btn_repo_reset)
         gi.addLayout(row_repo)
-        self.lbl_repo_status = QLabel("  Введите репозиторий и нажмите Проверить")
+        self.lbl_repo_status = QLabel(t("settings_install_repo_label"))
         self.lbl_repo_status.setStyleSheet("color: #888; font-size: 11px;")
         gi.addWidget(self.lbl_repo_status)
 
         row_cache2 = QHBoxLayout()
-        self.btn_clear_install_cache = QPushButton("🗑 Очистить кеш инструкций")
-        self.btn_clear_install_cache.setToolTip(
-            "Удаляет локально кешированные .json инструкции.\n"
-            "При следующей установке они будут заново скачаны с GitHub."
-        )
+        self.btn_clear_install_cache = QPushButton(t("settings_install_cache_clear"))
+        self.btn_clear_install_cache.setToolTip(t("settings_install_cache_clear_tip"))
         self.btn_clear_install_cache.clicked.connect(self._clear_install_cache)
         row_cache2.addWidget(self.btn_clear_install_cache)
         self.lbl_install_cache_info = QLabel("")
@@ -4146,7 +4127,7 @@ class MainWindow(QMainWindow):
         tmp_cfg["WorkshopDL"] = {"InstallRepo": repo_val} if repo_val else {}
         raw_url, api_url = _install_repo_url(tmp_cfg if repo_val else None)
 
-        self.lbl_repo_status.setText("  ⏳ Проверка...")
+        self.lbl_repo_status.setText(t("settings_install_repo_checking"))
         self.lbl_repo_status.setStyleSheet("color: #888;")
         self.btn_repo_test.setEnabled(False)
 
@@ -4158,16 +4139,16 @@ class MainWindow(QMainWindow):
                     files = r.json()
                     json_count = sum(1 for f in files if isinstance(f, dict)
                                      and f.get("name", "").endswith(".json"))
-                    msg = f"  ✅ Репозиторий доступен, найдено {json_count} инструкций"
+                    msg = t("settings_install_repo_available").format(count=json_count)
                     color = "#4CAF50"
                 elif r.status_code == 404:
-                    msg = "  ❌ Репозиторий или папка не найдены (404)"
+                    msg = t("settings_install_repo_not_found")
                     color = "#f44336"
                 else:
-                    msg = f"  ⚠ Ответ сервера: {r.status_code}"
+                    msg = t("settings_install_repo_server_error").format(status=r.status_code)
                     color = "#FF9800"
             except Exception as e:
-                msg   = f"  ❌ Ошибка подключения: {e}"
+                msg   = t("settings_install_repo_connection_error").format(error=str(e))
                 color = "#f44336"
 
             from PyQt5.QtCore import QMetaObject, Q_ARG
@@ -4186,7 +4167,7 @@ class MainWindow(QMainWindow):
     def _refresh_install_cache_info(self):
         """Обновляет метку с информацией о кеше инструкций."""
         if not os.path.isdir(INSTALL_LOCAL_DIR):
-            self.lbl_install_cache_info.setText("кеш пуст")
+            self.lbl_install_cache_info.setText(t("settings_install_cache_empty"))
             return
         files = [f for f in os.listdir(INSTALL_LOCAL_DIR) if f.endswith(".json")]
         total_kb = sum(
@@ -4194,10 +4175,10 @@ class MainWindow(QMainWindow):
             for f in files
         ) // 1024
         self.lbl_install_cache_info.setText(
-            f"кешировано: {len(files)} инструкций, {total_kb} КБ"
+            t("settings_install_cache_info").format(files_count=len(files), size_kb=total_kb)
         )
 
-    def _clear_install_cache(self):
+def _clear_install_cache(self):
         """Удаляет кешированные JSON инструкции (не папку plugins/)."""
         if not os.path.isdir(INSTALL_LOCAL_DIR):
             return
@@ -4209,10 +4190,12 @@ class MainWindow(QMainWindow):
                     removed += 1
                 except Exception:
                     pass
-        self.lbl_install_cache_info.setText(f"удалено {removed} файлов")
-        QMessageBox.information(self, "WorkshopDL",
-            f"Кеш инструкций очищен: удалено {removed} файлов.\n"
-            "При следующей установке инструкции будут заново скачаны с GitHub.")
+        self.lbl_install_cache_info.setText(t("settings_install_cache_removed_files").format(count=removed))
+        QMessageBox.information(
+            self,
+            "WorkshopDL",
+            t("settings_install_cache_cleared").format(count=removed)
+        )
 
 
 
@@ -4269,7 +4252,7 @@ class MainWindow(QMainWindow):
     def _fetch_lang_list(self):
         """Запрашивает список языков с GitHub."""
         self.btn_lang_refresh.setEnabled(False)
-        self.lbl_lang_status.setText("  ⟳ Загружаю список с GitHub...")
+        self.lbl_lang_status.setText(t("settings_language_downloading"))
         self.lbl_lang_status.setStyleSheet("color: #888;")
         self._lang_fetch_worker = LangFetchWorker()
         self._lang_fetch_worker.list_ready.connect(self._on_lang_list_ready)
