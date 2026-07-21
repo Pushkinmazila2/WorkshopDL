@@ -4213,7 +4213,7 @@ class MainWindow(QMainWindow):
             t("settings_install_cache_info").format(files_count=len(files), size_kb=total_kb)
         )
 
-def _clear_install_cache(self):
+    def _clear_install_cache(self):
         """Удаляет кешированные JSON инструкции (не папку plugins/)."""
         if not os.path.isdir(INSTALL_LOCAL_DIR):
             return
@@ -4226,9 +4226,7 @@ def _clear_install_cache(self):
                 except Exception:
                     pass
         self.lbl_install_cache_info.setText(t("settings_install_cache_removed_files").format(count=removed))
-        QMessageBox.information(
-            self,
-            "WorkshopDL",
+        QMessageBox.information(self, "WorkshopDL",
             t("settings_install_cache_cleared").format(count=removed)
         )
 
@@ -4266,7 +4264,7 @@ def _clear_install_cache(self):
         if f: self.inp_steamcmd.setText(f)
 
     def _browse_lang(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Файл локализации", "", "JSON (*.json)")
+        path, _ = QFileDialog.getOpenFileName(self, t("settings_language_browse_title"), "", "JSON (*.json)")
         if path: self.inp_lang.setText(path)
 
     # ── GitHub языки ──────────────────────────────────────────────────────────
@@ -4287,7 +4285,7 @@ def _clear_install_cache(self):
     def _fetch_lang_list(self):
         """Запрашивает список языков с GitHub."""
         self.btn_lang_refresh.setEnabled(False)
-        self.lbl_lang_status.setText(t("settings_language_downloading"))
+        self.lbl_lang_status.setText(t("settings_language_refreshing"))
         self.lbl_lang_status.setStyleSheet("color: #888;")
         self._lang_fetch_worker = LangFetchWorker()
         self._lang_fetch_worker.list_ready.connect(self._on_lang_list_ready)
@@ -4296,7 +4294,7 @@ def _clear_install_cache(self):
     def _on_lang_list_ready(self, remote_list):
         self.btn_lang_refresh.setEnabled(True)
         if not remote_list:
-            self.lbl_lang_status.setText("  ⚠  Нет соединения с GitHub")
+            self.lbl_lang_status.setText(t("settings_language_download_cantconnect"))
             self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
             return
 
@@ -4323,8 +4321,7 @@ def _clear_install_cache(self):
         downloaded = sum(1 for _, _, loc in remote_list if loc)
         total = len(remote_list)
         self.lbl_lang_status.setText(
-            f"  ✅ {total} языков на GitHub  |  {downloaded} скачано локально  "
-            f"|  ✅ = есть  ☁ = нажмите ⬇ Скачать"
+            t("settings_language_refresh_done").format(total=total, downloaded=downloaded)
         )
         self.lbl_lang_status.setStyleSheet("color: #27ae60;")
 
