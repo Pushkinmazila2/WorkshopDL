@@ -3951,41 +3951,54 @@ class MainWindow(QMainWindow):
         grp_lang = QGroupBox(t("settings_language_group"))
         gl2 = QVBoxLayout(grp_lang)
 
-        # Строка 1: выпадающий список языков с GitHub + кнопка обновить список
+        # Строка 1: Выпадающий список + кнопка обновить (теперь у них много места)
         row_cmb = QHBoxLayout()
         self.cmb_lang = QComboBox()
         self.cmb_lang.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.cmb_lang.setToolTip(t("settings_language_set_tip"))
         row_cmb.addWidget(self.cmb_lang)
+        
         self.btn_lang_refresh = QPushButton(t("settings_language_refresh"))
         self.btn_lang_refresh.setFixedWidth(34)
         self.btn_lang_refresh.setToolTip(t("settings_language_refresh_tip"))
         self.btn_lang_refresh.clicked.connect(self._fetch_lang_list)
         row_cmb.addWidget(self.btn_lang_refresh)
-        self.btn_lang_dl = QPushButton(t("settings_language_download"))
-        self.btn_lang_dl.setFixedWidth(90)
-        self.btn_lang_dl.clicked.connect(self._download_selected_lang)
-        row_cmb.addWidget(self.btn_lang_dl)
-        self.btn_lang_apply = QPushButton(t("settings_language_apply"))
-        self.btn_lang_apply.setFixedWidth(90)
-        self.btn_lang_apply.clicked.connect(self._apply_lang_from_combo)
-        row_cmb.addWidget(self.btn_lang_apply)
         gl2.addLayout(row_cmb)
 
-        # Статус
+        # Новая Строка 1.5: Кнопки действий переносим СНИЗУ под комбобокс. 
+        # Это спасет интерфейс от наездов кнопок друг на друга на Steam Deck!
+        row_actions = QHBoxLayout()
+        
+        self.btn_lang_dl = QPushButton(t("settings_language_download"))
+        self.btn_lang_dl.setMinimumWidth(100) # Даем кнопкам нормально отобразить текст
+        self.btn_lang_dl.clicked.connect(self._download_selected_lang)
+        row_actions.addWidget(self.btn_lang_dl)
+        
+        self.btn_lang_apply = QPushButton(t("settings_language_apply"))
+        self.btn_lang_apply.setMinimumWidth(100)
+        self.btn_lang_apply.clicked.connect(self._apply_lang_from_combo)
+        row_actions.addWidget(self.btn_lang_apply)
+        
+        # Добавляем пружину, чтобы кнопки аккуратно прижимались к левому краю
+        row_actions.addStretch() 
+        gl2.addLayout(row_actions)
+
+        # Статус скачивания
         self.lbl_lang_status = QLabel(t("settings_language_download_label"))
         self.lbl_lang_status.setStyleSheet("color: #888;")
         gl2.addWidget(self.lbl_lang_status)
 
-        # Строка 2: свой файл
+        # Строка 2: Свой файл локализации (тоже делаем более свободной)
         row_custom = QHBoxLayout()
         row_custom.addWidget(QLabel(t("settings_language_label")))
         self.inp_lang = QLineEdit()
         self.inp_lang.setPlaceholderText(LANG_DEF_PATH)
         row_custom.addWidget(self.inp_lang)
+        
         btn_lang_browse = QPushButton(t("settings_language_browse"))
         btn_lang_browse.clicked.connect(self._browse_lang)
         row_custom.addWidget(btn_lang_browse)
+        
         btn_lang_file_apply = QPushButton(t("settings_language_apply"))
         btn_lang_file_apply.clicked.connect(self._apply_language)
         row_custom.addWidget(btn_lang_file_apply)
