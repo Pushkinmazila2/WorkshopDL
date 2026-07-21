@@ -32,7 +32,7 @@ jobs:
       - name: Create git tag
         run: |
           git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "github-actions[bot]@://github.com"
           git tag ${{ steps.gen.outputs.tag }}
           git push origin ${{ steps.gen.outputs.tag }}
 
@@ -60,9 +60,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force release | Out-Null
           Copy-Item dist\WorkshopDL.exe release\
+          # Проверяем файлы как в корне, так и в подпапках репозитория
           if (Test-Path lang_en.json) { Copy-Item lang_en.json release\ }
           if (Test-Path lang_ru.json) { Copy-Item lang_ru.json release\ }
-          if (Test-Path lang)         { Copy-Item lang release\lang -Recurse }
+          if (Test-Path lang\en.json)  { Copy-Item lang\en.json release\lang_en.json }
+          if (Test-Path lang\ru.json)  { Copy-Item lang\ru.json release\lang_ru.json }
+          if (Test-Path lang)         { Copy-Item lang release\lang -Recurse -ErrorAction SilentlyContinue }
+          if (Test-Path Modules)      { Copy-Item Modules release\Modules -Recurse -ErrorAction SilentlyContinue }
           Compress-Archive -Path release\* -DestinationPath WorkshopDL-windows.zip
 
       - name: Upload artifact
@@ -102,11 +106,15 @@ jobs:
 
       - name: Package tar.gz
         run: |
-          mkdir release
+          mkdir -p release
           cp dist/WorkshopDL release/
+          # Аккуратно проверяем все возможные варианты расположения файлов локализации
           [ -f lang_en.json ] && cp lang_en.json release/
           [ -f lang_ru.json ] && cp lang_ru.json release/
-          [ -d lang ] && cp -r lang release/lang
+          [ -f lang/en.json ] && cp lang/en.json release/lang_en.json
+          [ -f lang/ru.json ] && cp lang/ru.json release/lang_ru.json
+          [ -d lang ] && cp -r lang release/
+          [ -d Modules ] && cp -r Modules release/
           cd release && tar -czf ../WorkshopDL-linux.tar.gz .
 
       - name: Upload artifact
@@ -138,11 +146,28 @@ jobs:
 
       - name: Package ZIP
         run: |
-          mkdir release
-          [ -d dist/WorkshopDL.app ] && cp -r dist/WorkshopDL.app release/ || cp dist/WorkshopDL release/
+          mkdir -p release
+          if [ -d dist/WorkshopDL.app ]; then
+            cp -r dist/WorkshopDL.app release/
+            # Копируем языки внутрь ресурсов macOS пакета, чтобы приложение их точно увидело
+            TARGET_DIR="release/WorkshopDL.app/Contents/Resources"
+            mkdir -p "$TARGET_DIR"
+            [ -f lang_en.json ] && cp lang_en.json "$TARGET_DIR/"
+            [ -f lang_ru.json ] && cp lang_ru.json "$TARGET_DIR/"
+            [ -f lang/en.json ] && cp lang/en.json "$TARGET_DIR/lang_en.json"
+            [ -f lang/ru.json ] && cp lang/ru.json "$TARGET_DIR/lang_ru.json"
+            [ -d lang ] && cp -r lang "$TARGET_DIR/"
+            [ -d Modules ] && cp -r Modules "$TARGET_DIR/"
+          else
+            cp dist/WorkshopDL release/
+          fi
+          
+          # На всякий случай дублируем файлы в корень архива
           [ -f lang_en.json ] && cp lang_en.json release/
           [ -f lang_ru.json ] && cp lang_ru.json release/
-          [ -d lang ] && cp -r lang release/lang
+          [ -d lang ] && cp -r lang release/
+          [ -d Modules ] && cp -r Modules release/
+          
           cd release && zip -r ../WorkshopDL-macos.zip .
 
       - name: Upload artifact
@@ -163,26 +188,27 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
-          name: "WorkshopDL ${{ needs.version.outputs.tag }}"
+          name: "DEV WorkshopDL ${{ needs.version.outputs.tag }}"
           body: |
-            ## WorkshopDL ${{ needs.version.outputs.tag }}
+            ## DEV WorkshopDL ${{ needs.version.outputs.tag }}
             > Автосборка при изменении `workshopdl.py`
 
             ### 📦 Файлы
+
             | Файл | Платформа |
             |------|-----------|
-            | `WorkshopDL.exe` | Windows (только exe) |
-            | `WorkshopDL-windows.zip` | Windows (exe + языки) |
-            | `WorkshopDL-linux.tar.gz` | Linux |
-            | `WorkshopDL-macos.zip` | macOS |
+            | `windows-build/dist/WorkshopDL.exe` | Windows (только exe) |
+            | `windows-build/WorkshopDL-windows.zip` | Windows (exe + языки) |
+            | `linux-build/WorkshopDL-linux.tar.gz` | Linux |
+            | `macos-build/WorkshopDL-macos.zip` | macOS |
 
             ### 🚀 Быстрый старт
-            1. Скачай архив для своей платформы и распакуй
-            2. Запусти `WorkshopDL.exe` (Windows) или `WorkshopDL` (Linux/macOS)
-            3. В настройках нажми **⬇ Скачать SteamCMD автоматически**
+            1. Скачай архив для своей платформы и распакуй.
+            2. Запусти `WorkshopDL.exe` (Windows) или `WorkshopDL` (Linux/macOS).
+            3. В настройках нажми **⬇ Скачать SteamCMD автоматически**.
 
             ### 🌐 Языки
-            Английский и русский включены. Другие — кнопка **⟳** в настройках.
+            Английский и русский включены по умолчанию. Другие локализации доступны по кнопке **⟳** в настройках.
 
           files: |
             windows-build/dist/WorkshopDL.exe
