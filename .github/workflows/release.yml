@@ -8,7 +8,7 @@ on:
     paths:
       - "workshopdl.py"   # блок запуска
       - "!install/**"
-
+  workflow_dispatch:
 permissions:
   contents: write
 
