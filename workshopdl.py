@@ -4294,7 +4294,7 @@ class MainWindow(QMainWindow):
     def _on_lang_list_ready(self, remote_list):
         self.btn_lang_refresh.setEnabled(True)
         if not remote_list:
-            self.lbl_lang_status.setText(t("settings_language_download_cantconnect"))
+            self.lbl_lang_status.setText(t("settings_language_refresh_error"))
             self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
             return
 
@@ -4330,7 +4330,7 @@ class MainWindow(QMainWindow):
         if idx < 0: return
         code, local_path, is_local = self.cmb_lang.itemData(idx)
         if is_local and local_path and os.path.exists(local_path):
-            self.lbl_lang_status.setText(f"  ✅ Язык уже скачан: {local_path}")
+            self.lbl_lang_status.setText(t("settings_language_download_alreadydone").format(path=local_path))
             return
         self.btn_lang_dl.setEnabled(False)
         self._lang_dl_worker = LangFetchWorker(download_code=code)
@@ -4341,12 +4341,12 @@ class MainWindow(QMainWindow):
     def _on_lang_downloaded(self, success, path_or_err):
         self.btn_lang_dl.setEnabled(True)
         if success:
-            self.lbl_lang_status.setText(f"  ✅ Скачано: {path_or_err}")
+            self.lbl_lang_status.setText(t("settings_language_downloaded").format(path_or_err=path_or_err))
             self.lbl_lang_status.setStyleSheet("color: #27ae60;")
             # Обновляем комбо
             self._fetch_lang_list()
         else:
-            self.lbl_lang_status.setText(f"  ❌ Ошибка: {path_or_err}")
+            self.lbl_lang_status.setText(t("settings_language_download_error").format(error=path_or_err))
             self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
 
     def _apply_lang_from_combo(self):
@@ -4355,7 +4355,7 @@ class MainWindow(QMainWindow):
         if idx < 0: return
         code, local_path, is_local = self.cmb_lang.itemData(idx)
         if not is_local or not local_path or not os.path.exists(local_path):
-            self.lbl_lang_status.setText("  ⚠  Сначала скачайте язык (кнопка ⬇ Скачать)")
+            self.lbl_lang_status.setText(t("settings_language_apply_nofile"))
             self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
             return
         # Сохраняем код языка в конфиг
@@ -4473,7 +4473,7 @@ class MainWindow(QMainWindow):
         ]
         existing = [p for p in targets if os.path.exists(p)]
         if not existing:
-            self.lbl_cache_status.setText("✅ Кеш уже чистый")
+            self.lbl_cache_status.setText(t("settings_download_cache_clear"))
             self.lbl_cache_status.setStyleSheet("color: #27ae60;")
             return
         reply = QMessageBox.question(
