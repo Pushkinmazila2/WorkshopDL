@@ -1,0 +1,17 @@
+name: "🐛 Bug Report / Сообщить об ошибке"
+description: "English or Russian / На английском или русском"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please fill out this form in English or Russian.
+        Пожалуйста, заполните форму на английском или русском языке.
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Steps to reproduce / Шаги для воспроизведения"
+      description: "What did you do? / Что вы сделали?"
+      placeholder: "1. Go to... / 1. Перейдите в..."
+    validations:
+      required: true

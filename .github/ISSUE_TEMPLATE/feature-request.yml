@@ -1,0 +1,36 @@
+name: "🚀 Feature Request / Запрос функционала"
+description: "Propose a new idea or improvement / Предложить идею или улучшение"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### Thank you for your suggestion! / Спасибо за ваше предложение!
+        Please describe your idea below. You can write in English or Russian.
+        Пожалуйста, опишите вашу идею ниже. Вы можете писать на английском или русском языке.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Is your feature request related to a problem? / Связано ли это предложение с какой-то проблемой?"
+      description: "A clear and concise description of what the problem is. (e.g. I'm always frustrated when...) / Четкое и краткое описание проблемы. (например: Меня всегда расстраивает, когда...)"
+      placeholder: "Example: Currently, it is difficult to... / Пример: В данный момент сложно..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: "Describe the solution you'd like / Опишите решение, которое вы хотите видеть"
+      description: "A clear and concise description of what you want to happen. / Четкое и краткое описание того, как должна работать новая фича."
+      placeholder: "Example: I would like to see a button that... / Пример: Я бы хотел видеть кнопку, которая..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: "Additional context / Дополнительный контекст"
+      description: "Add any other context, screenshots, or mockups about the feature request here. / Добавьте сюда любые другие подробности, скриншоты или макеты интерфейса."
+    validations:
+      required: false
