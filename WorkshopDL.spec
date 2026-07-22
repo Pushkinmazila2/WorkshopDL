@@ -9,15 +9,11 @@ IS_WIN   = sys.platform == "win32"
 IS_MAC   = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
-# Если есть папка lang/ — включаем все JSON из неё
-if os.path.isdir("lang"):
-    datas.append(("lang/*.json", "lang"))
-
 a = Analysis(
     ["workshopdl.py"],
     pathex=[],
     binaries=[],
-    datas=datas,
+    datas=[],     # <-- Языки не вшиваем внутрь. Они поставляются в папке Modules/lang/ снаружи EXE
     hiddenimports=[
         "PyQt5",
         "PyQt5.QtWidgets",
@@ -123,5 +119,5 @@ else:
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
-        icon=None,               # замените на "icon.ico" если есть иконка
+        icon=None,
     )
