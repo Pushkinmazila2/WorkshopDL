@@ -9,12 +9,6 @@ IS_WIN   = sys.platform == "win32"
 IS_MAC   = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
-# Файлы локализации которые нужно включить в сборку
-datas = [
-    ("lang_en.json", "."),
-    ("lang_ru.json", "."),
-]
-
 # Если есть папка lang/ — включаем все JSON из неё
 if os.path.isdir("lang"):
     datas.append(("lang/*.json", "lang"))
