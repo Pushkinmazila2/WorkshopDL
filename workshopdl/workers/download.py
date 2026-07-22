@@ -36,18 +36,18 @@ class DownloadWorker(QThread):
 
     def run(self):
         if self.start_from == 0:
-            self.log_line.emit("🔗 Проверка зависимостей...")
+            self.log_line.emit(t("deps_checking"))
             try:
                 all_deps = fetch_dependencies(self.mod_ids)
                 known    = set(self.mod_ids)
                 new_deps = {k: v for k, v in all_deps.items() if k not in known}
                 if new_deps:
-                    self.log_line.emit(f"🔗 Найдено {len(new_deps)} зависимост(ей) — см. диалог")
+                    self.log_line.emit(t("deps_found", count=len(new_deps)))
                     self.deps_found.emit(new_deps)
                 else:
-                    self.log_line.emit("🔗 Зависимостей нет")
+                    self.log_line.emit(t("deps_none"))
             except Exception as e:
-                self.log_line.emit(f"🔗 Не удалось проверить зависимости: {e}")
+                self.log_line.emit(t("deps_fail", err=str(e)))
 
         total   = len(self.mod_ids)
         pending = [m for i, m in enumerate(self.mod_ids, 1) if i > self.start_from]
@@ -82,7 +82,7 @@ class DownloadWorker(QThread):
                 first = done + 1
                 last  = done + len(batch)
                 self.log_line.emit(
-                    f"\n📦 Пачка [{first}–{last}/{total}]: {len(batch)} модов..."
+                    t("log_batch_start", first=first, last=last, total=total, count=len(batch))
                 )
                 self.progress.emit(done, total)
                 results = self._run_batch(batch)
@@ -102,6 +102,7 @@ class DownloadWorker(QThread):
         queue_clear()
         self.progress.emit(total, total)
         self.finished.emit(success, fail)
+
 
     def _run_batch(self, mod_ids: list) -> dict:
         args = ([self.steamcmd, "+login", "anonymous"] if self.anonymous
@@ -143,8 +144,9 @@ class DownloadWorker(QThread):
             details = fetch_mod_details_batch([mod_id])
             info    = details.get(mod_id)
             if not info:
-                self.log_line.emit(f"  ⚠ [{mod_id}] Мод не найден в Steam — возможно удалён")
+                self.log_line.emit(t("diag_not_found", mod_id=mod_id))
                 return
+            
             title = info.get("title", mod_id)
             r = requests.post(
                 "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
@@ -157,17 +159,14 @@ class DownloadWorker(QThread):
             ban_reason  = item.get("ban_reason", "")
 
             if banned:
-                self.log_line.emit(f"  🚫 [{title}] Мод заблокирован Valve: {ban_reason}")
+                self.log_line.emit(t("diag_banned", title=title, reason=ban_reason))
             elif visibility == 2:
-                self.log_line.emit(f"  🔒 [{title}] Мод приватный — автор ограничил доступ")
+                self.log_line.emit(t("diag_private", title=title))
             elif visibility == 1:
-                self.log_line.emit(f"  🔒 [{title}] Мод доступен только друзьям автора")
+                self.log_line.emit(t("diag_friends", title=title))
             elif result_code != 1:
-                self.log_line.emit(f"  ⚠ [{title}] Steam вернул ошибку (code={result_code})")
+                self.log_line.emit(t("diag_steam_error", title=title, code=result_code))
             else:
-                self.log_line.emit(
-                    f"  🔑 [{title}] Мод публичный, но требует владения игрой.\n"
-                    f"     Попробуйте: Настройки → отключить анонимный режим и войти в аккаунт."
-                )
+                self.log_line.emit(t("diag_requires_ownership", title=title))
         except Exception:
             pass
