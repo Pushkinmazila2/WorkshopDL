@@ -1064,7 +1064,7 @@ class MainWindow(QMainWindow):
 
         # Статус
         self.lbl_lang_status = QLabel("  ⟳ Нажмите ⟳ чтобы загрузить список языков с GitHub")
-        self.lbl_lang_status.setStyleSheet("color: #888;")
+        self.lbl_lang_status.setStyleSheet("color: Palette(PlaceholderText);")
         gl2.addWidget(self.lbl_lang_status)
 
         # Строка 2: свой файл
@@ -1250,7 +1250,7 @@ class MainWindow(QMainWindow):
         """Запрашивает список языков с GitHub."""
         self.btn_lang_refresh.setEnabled(False)
         self.lbl_lang_status.setText("  ⟳ Загружаю список с GitHub...")
-        self.lbl_lang_status.setStyleSheet("color: #888;")
+        self.lbl_lang_status.setStyleSheet("color: Palette(PlaceholderText);")
         self._lang_fetch_worker = LangFetchWorker()
         self._lang_fetch_worker.list_ready.connect(self._on_lang_list_ready)
         self._lang_fetch_worker.start()
@@ -1259,7 +1259,7 @@ class MainWindow(QMainWindow):
         self.btn_lang_refresh.setEnabled(True)
         if not remote_list:
             self.lbl_lang_status.setText("  ⚠  Нет соединения с GitHub")
-            self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
+            self.lbl_lang_status.setStyleSheet("color: Palette(ToolTipText);")
             return
 
         saved_code = cfg_get(self.cfg, "WorkshopDL", "LangCode", "en")
@@ -1288,7 +1288,7 @@ class MainWindow(QMainWindow):
             f"  ✅ {total} языков на GitHub  |  {downloaded} скачано локально  "
             f"|  ✅ = есть  ☁ = нажмите ⬇ Скачать"
         )
-        self.lbl_lang_status.setStyleSheet("color: #27ae60;")
+        self.lbl_lang_status.setStyleSheet("color: Palette(Link);")
 
     def _download_selected_lang(self):
         idx = self.cmb_lang.currentIndex()
@@ -1307,12 +1307,12 @@ class MainWindow(QMainWindow):
         self.btn_lang_dl.setEnabled(True)
         if success:
             self.lbl_lang_status.setText(f"  ✅ Скачано: {path_or_err}")
-            self.lbl_lang_status.setStyleSheet("color: #27ae60;")
+            self.lbl_lang_status.setStyleSheet("color: Palette(Link);")
             # Обновляем комбо
             self._fetch_lang_list()
         else:
             self.lbl_lang_status.setText(f"  ❌ Ошибка: {path_or_err}")
-            self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
+            self.lbl_lang_status.setStyleSheet("color: Palette(ToolTipText);")
 
     def _apply_lang_from_combo(self):
         """Применяет язык выбранный в комбо."""
@@ -1321,7 +1321,7 @@ class MainWindow(QMainWindow):
         code, local_path, is_local = self.cmb_lang.itemData(idx)
         if not is_local or not local_path or not os.path.exists(local_path):
             self.lbl_lang_status.setText("  ⚠  Сначала скачайте язык (кнопка ⬇ Скачать)")
-            self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
+            self.lbl_lang_status.setStyleSheet("color: Palette(ToolTipText);")
             return
         # Сохраняем код языка в конфиг
         if "WorkshopDL" not in self.cfg: self.cfg["WorkshopDL"] = {}
@@ -1387,10 +1387,10 @@ class MainWindow(QMainWindow):
         exe = self._get_steamcmd()
         if os.path.exists(exe):
             self.lbl_steamcmd_status.setText(f"✅  {exe}")
-            self.lbl_steamcmd_status.setStyleSheet("color: #27ae60; font-weight: bold;")
+            self.lbl_steamcmd_status.setStyleSheet("color: Palette(Link); font-weight: bold;")
         else:
             self.lbl_steamcmd_status.setText(t("steamcmd_not_found"))
-            self.lbl_steamcmd_status.setStyleSheet("color: #e74c3c;")
+            self.lbl_steamcmd_status.setStyleSheet("color: Palette(ToolTipText);")
 
     def _download_steamcmd(self):
         self.btn_dl_steamcmd.setEnabled(False)
@@ -1420,14 +1420,14 @@ class MainWindow(QMainWindow):
         if success:
             self.inp_steamcmd.setText(path_or_err)
             self.lbl_steamcmd_dl.setText(t("steamcmd_dl_done"))
-            self.lbl_steamcmd_dl.setStyleSheet("color: #27ae60; font-weight: bold;")
+            self.lbl_steamcmd_dl.setStyleSheet("color: Palette(Link); font-weight: bold;")
             self._refresh_steamcmd_status()
             if "WorkshopDL" not in self.cfg: self.cfg["WorkshopDL"] = {}
             self.cfg["WorkshopDL"]["SteamCMDPath"] = path_or_err
             save_config(self.cfg)
         else:
             self.lbl_steamcmd_dl.setText(t("steamcmd_dl_error", err=path_or_err))
-            self.lbl_steamcmd_dl.setStyleSheet("color: #e74c3c;")
+            self.lbl_steamcmd_dl.setStyleSheet("color: Palette(ToolTipText);")
 
     def _clear_steamcmd_cache(self):
         """Удаляет userdata/ и steamapps/ внутри папки steamcmd."""
@@ -1439,7 +1439,7 @@ class MainWindow(QMainWindow):
         existing = [p for p in targets if os.path.exists(p)]
         if not existing:
             self.lbl_cache_status.setText("✅ Кеш уже чистый")
-            self.lbl_cache_status.setStyleSheet("color: #27ae60;")
+            self.lbl_cache_status.setStyleSheet("color: Palette(Link);")
             return
         reply = QMessageBox.question(
             self, "Очистка кеша SteamCMD",
@@ -1456,10 +1456,10 @@ class MainWindow(QMainWindow):
                 errors.append(str(e))
         if errors:
             self.lbl_cache_status.setText(f"⚠ Ошибка: {errors[0]}")
-            self.lbl_cache_status.setStyleSheet("color: #e74c3c;")
+            self.lbl_cache_status.setStyleSheet("color: Palette(ToolTipText);")
         else:
             self.lbl_cache_status.setText("✅ Кеш очищен")
-            self.lbl_cache_status.setStyleSheet("color: #27ae60;")
+            self.lbl_cache_status.setStyleSheet("color: Palette(Link);")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
     def _extract_id(self, text):

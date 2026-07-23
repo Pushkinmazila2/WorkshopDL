@@ -343,7 +343,7 @@ class MainWindow(QMainWindow):
         gl2.addLayout(row_actions)
 
         self.lbl_lang_status = QLabel(t("settings_language_download_label"))
-        self.lbl_lang_status.setStyleSheet("color: #888;")
+        self.lbl_lang_status.setStyleSheet("color: Palette(PlaceholderText);")
         gl2.addWidget(self.lbl_lang_status)
 
         row_custom = QHBoxLayout()
@@ -415,7 +415,7 @@ class MainWindow(QMainWindow):
         row_repo.addWidget(btn_repo_reset)
         gi.addLayout(row_repo)
         self.lbl_repo_status = QLabel(t("settings_install_repo_label"))
-        self.lbl_repo_status.setStyleSheet("color: #888; font-size: 11px;")
+        self.lbl_repo_status.setStyleSheet("color: Palette(PlaceholderText); font-size: 11px;")
         gi.addWidget(self.lbl_repo_status)
 
         row_cache2 = QHBoxLayout()
@@ -424,7 +424,7 @@ class MainWindow(QMainWindow):
         self.btn_clear_install_cache.clicked.connect(self._clear_install_cache)
         row_cache2.addWidget(self.btn_clear_install_cache)
         self.lbl_install_cache_info = QLabel("")
-        self.lbl_install_cache_info.setStyleSheet("color: #888; font-size: 11px;")
+        self.lbl_install_cache_info.setStyleSheet("color: Palette(PlaceholderText); font-size: 11px;")
         row_cache2.addWidget(self.lbl_install_cache_info)
         row_cache2.addStretch()
         gi.addLayout(row_cache2)
@@ -514,7 +514,7 @@ class MainWindow(QMainWindow):
         raw_url, api_url = install_repo_url(tmp_cfg if repo_val else None)
 
         self.lbl_repo_status.setText(t("settings_install_repo_checking"))
-        self.lbl_repo_status.setStyleSheet("color: #888;")
+        self.lbl_repo_status.setStyleSheet("color: Palette(PlaceholderText);")
         self.btn_repo_test.setEnabled(False)
 
         def _check():
@@ -626,7 +626,7 @@ class MainWindow(QMainWindow):
     def _fetch_lang_list(self):
         self.btn_lang_refresh.setEnabled(False)
         self.lbl_lang_status.setText(t("settings_language_refreshing"))
-        self.lbl_lang_status.setStyleSheet("color: #888;")
+        self.lbl_lang_status.setStyleSheet("color: Palette(PlaceholderText);")
         self._lang_fetch_worker = LangFetchWorker()
         self._lang_fetch_worker.list_ready.connect(self._on_lang_list_ready)
         self._lang_fetch_worker.start()
@@ -635,7 +635,7 @@ class MainWindow(QMainWindow):
         self.btn_lang_refresh.setEnabled(True)
         if not remote_list:
             self.lbl_lang_status.setText(t("settings_language_refresh_error"))
-            self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
+            self.lbl_lang_status.setStyleSheet("color: Palette(ToolTipText);")
             return
 
         saved_code = cfg_get(self.cfg, "WorkshopDL", "LangCode", "en")
@@ -661,7 +661,7 @@ class MainWindow(QMainWindow):
         self.lbl_lang_status.setText(
             t("settings_language_refresh_done").format(total=total, downloaded=downloaded)
         )
-        self.lbl_lang_status.setStyleSheet("color: #27ae60;")
+        self.lbl_lang_status.setStyleSheet("color: Palette(Link);")
 
     def _download_selected_lang(self):
         idx = self.cmb_lang.currentIndex()
@@ -680,11 +680,11 @@ class MainWindow(QMainWindow):
         self.btn_lang_dl.setEnabled(True)
         if success:
             self.lbl_lang_status.setText(t("settings_language_downloaded").format(path_or_err=path_or_err))
-            self.lbl_lang_status.setStyleSheet("color: #27ae60;")
+            self.lbl_lang_status.setStyleSheet("color: Palette(Link);")
             self._fetch_lang_list()
         else:
             self.lbl_lang_status.setText(t("settings_language_download_error").format(error=path_or_err))
-            self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
+            self.lbl_lang_status.setStyleSheet("color: Palette(ToolTipText);")
 
     def _apply_lang_from_combo(self):
         idx = self.cmb_lang.currentIndex()
@@ -692,7 +692,7 @@ class MainWindow(QMainWindow):
         code, local_path, is_local = self.cmb_lang.itemData(idx)
         if not is_local or not local_path or not os.path.exists(local_path):
             self.lbl_lang_status.setText(t("settings_language_apply_nofile"))
-            self.lbl_lang_status.setStyleSheet("color: #e74c3c;")
+            self.lbl_lang_status.setStyleSheet("color: Palette(ToolTipText);")
             return
         if "WorkshopDL" not in self.cfg: self.cfg["WorkshopDL"] = {}
         self.cfg["WorkshopDL"]["LangCode"] = code
@@ -751,10 +751,10 @@ class MainWindow(QMainWindow):
         exe = self._get_steamcmd()
         if os.path.exists(exe):
             self.lbl_steamcmd_status.setText(f"✅  {exe}")
-            self.lbl_steamcmd_status.setStyleSheet("color: #27ae60; font-weight: bold;")
+            self.lbl_steamcmd_status.setStyleSheet("color: Palette(Link); font-weight: bold;")
         else:
             self.lbl_steamcmd_status.setText(t("steamcmd_not_found"))
-            self.lbl_steamcmd_status.setStyleSheet("color: #e74c3c;")
+            self.lbl_steamcmd_status.setStyleSheet("color: Palette(ToolTipText);")
 
     def _download_steamcmd(self):
         self.btn_dl_steamcmd.setEnabled(False)
@@ -784,14 +784,14 @@ class MainWindow(QMainWindow):
         if success:
             self.inp_steamcmd.setText(path_or_err)
             self.lbl_steamcmd_dl.setText(t("steamcmd_dl_done"))
-            self.lbl_steamcmd_dl.setStyleSheet("color: #27ae60; font-weight: bold;")
+            self.lbl_steamcmd_dl.setStyleSheet("color: Palette(Link); font-weight: bold;")
             self._refresh_steamcmd_status()
             if "WorkshopDL" not in self.cfg: self.cfg["WorkshopDL"] = {}
             self.cfg["WorkshopDL"]["SteamCMDPath"] = path_or_err
             save_config(self.cfg)
         else:
             self.lbl_steamcmd_dl.setText(t("steamcmd_dl_error", err=path_or_err))
-            self.lbl_steamcmd_dl.setStyleSheet("color: #e74c3c;")
+            self.lbl_steamcmd_dl.setStyleSheet("color: Palette(ToolTipText);")
 
     def _clear_steamcmd_cache(self):
         steamcmd_dir = os.path.dirname(self._get_steamcmd())
@@ -802,7 +802,7 @@ class MainWindow(QMainWindow):
         existing = [p for p in targets if os.path.exists(p)]
         if not existing:
             self.lbl_cache_status.setText(t("settings_download_cache_clear"))
-            self.lbl_cache_status.setStyleSheet("color: #27ae60;")
+            self.lbl_cache_status.setStyleSheet("color: Palette(Link);")
             return
         reply = QMessageBox.question(
             self, "Очистка кеша SteamCMD",
@@ -819,10 +819,10 @@ class MainWindow(QMainWindow):
                 errors.append(str(e))
         if errors:
             self.lbl_cache_status.setText(f"⚠ Ошибка: {errors[0]}")
-            self.lbl_cache_status.setStyleSheet("color: #e74c3c;")
+            self.lbl_cache_status.setStyleSheet("color: Palette(ToolTipText);")
         else:
             self.lbl_cache_status.setText("✅ Кеш очищен")
-            self.lbl_cache_status.setStyleSheet("color: #27ae60;")
+            self.lbl_cache_status.setStyleSheet("color: Palette(Link);")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
     def _extract_id(self, text):
