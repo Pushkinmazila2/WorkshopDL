@@ -19,7 +19,7 @@ from workshopdl.config import (
     DISABLED_SUFFIX, mod_is_disabled, mod_toggle, folder_size_mb,
     install_repo_url, GITHUB_INSTALL_RAW, GITHUB_INSTALL_API,
     INSTALL_LOCAL_DIR, INSTALL_REPO_DEFAULT, INSTALL_PATH_DEFAULT,
-    LANG_DEF_PATH, LANG_LOCAL_DIR,
+    LANG_DEF_PATH, LANG_LOCAL_DIR, STEAMCMD_BIN,
 )
 from workshopdl.localization import t, lang_load, lang_list_local, lang_local_path, LangFetchWorker
 from workshopdl.storage import (
