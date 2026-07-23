@@ -153,7 +153,7 @@ No files are deleted. Your game will ignore `.disabled` folders
 
 All UI strings live in a single JSON file. To create a new translation:
 
-1. Copy `lang_en.json` and rename it, e.g. `lang_de.json`
+1. Copy `\Modules\lang\en.json` and rename it, e.g. `\Modules\lang\de.json`
 2. Translate the **values** (right side of each line) — do not change the keys
 3. In **Settings → Language**, browse to your file and click **✅ Apply**
 
