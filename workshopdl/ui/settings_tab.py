@@ -6,7 +6,7 @@ import os, threading, configparser, requests
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
     QCheckBox, QGroupBox, QComboBox, QSpinBox, QTextEdit, QLabel,
-    QFileDialog, QProgressBar, QMessageBox,
+    QFileDialog, QProgressBar, QMessageBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt, QMetaObject, Q_ARG, pyqtSlot
 from PyQt5.QtGui import QFont
