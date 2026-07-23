@@ -78,7 +78,7 @@
   "settings_language_browse_title": "Sélectionne un fichier",
   "settings_language_apply": "✅ Appliquer",
   "settings_language_apply_nofile": "  ⚠  Téléchargez d'abord la langue (avec ⬇ Charger)",
-  "settings_language_note": "un fichier de localisation est un fichier JSON Copier lang_en.json, traduisez les valeur et sélectionner votre fichier",
+  "settings_language_note": "un fichier de localisation est un fichier JSON Copier  /modules/lang/en.json, traduisez les valeur et sélectionner votre fichier",
   "settings_dependency_group": "🔗 Dépendances et téléchargements",
   "settings_dependency_label": "Action si un mod nécessite des dépendances non téléchargées :",
   "settings_dependency_ask": "❓ Toujours demander",

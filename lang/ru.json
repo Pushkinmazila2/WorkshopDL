@@ -78,7 +78,7 @@
   "settings_language_browse_title": "Файл локализации",
   "settings_language_apply": "✅ Применить",
   "settings_language_apply_nofile": "  ⚠  Сначала скачайте язык (кнопка ⬇ Скачать)",
-  "settings_language_note": "Файл локализации — обычный JSON. Скопируй lang_ru.json, переведи значения и укажи путь к новому файлу.",
+  "settings_language_note": "Файл локализации — обычный JSON. Скопируй  /modules/lang/ru.json, переведи значения и укажи путь к новому файлу.",
   "settings_dependency_group": "🔗 Зависимости и загрузка",
   "settings_dependency_label": "Что делать если у мода есть незагруженные зависимости:",
   "settings_dependency_ask": "❓ Всегда спрашивать",
