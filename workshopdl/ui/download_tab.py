@@ -11,8 +11,10 @@ from PyQt5.QtCore import Qt, QUrl, pyqtSlot
 from PyQt5.QtGui import QFont, QDesktopServices
 
 from workshopdl.config import cfg_get
+from workshopdl.config import open_folder
 from workshopdl.localization import t
 from workshopdl.steam_api import fetch_game_id_for_mod, fetch_collection
+from workshopdl.storage import history_add
 from workshopdl.workers.download import DownloadWorker
 
 

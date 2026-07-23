@@ -6,7 +6,7 @@ import os, threading, configparser, requests
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
     QCheckBox, QGroupBox, QComboBox, QSpinBox, QTextEdit, QLabel,
-    QFileDialog, QProgressBar, QMessageBox, QSizePolicy
+    QFileDialog, QProgressBar, QMessageBox, QSizePolicy, QTabWidget
 )
 from PyQt5.QtCore import Qt, QMetaObject, Q_ARG, pyqtSlot
 from PyQt5.QtGui import QFont
@@ -15,10 +15,15 @@ from workshopdl.config import (
     cfg_get, save_config, STEAMCMD_DEF, STEAMCMD_BIN, IS_WIN,
     LANG_DEF_PATH, INSTALL_LOCAL_DIR, INSTALL_REPO_DEFAULT,
     INSTALL_PATH_DEFAULT, GITHUB_INSTALL_RAW, GITHUB_INSTALL_API,
-    install_repo_url,
+    install_repo_url, APP_DIR,
 )
 from workshopdl.localization import (
     t, lang_load, lang_list_local, lang_local_path, LangFetchWorker,
+)
+
+from workshopdl.storage import (
+    history_add, history_get_name, history_get_game_folder,
+    mod_paths_add,
 )
 from workshopdl.workers.steamcmd_install import SteamCMDInstallWorker
 
