@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - dev
     paths:
       - "workshopdl.py"   # блок запуска
       - "!install/**"
@@ -18,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.gen.outputs.tag }}
+      is_dev: ${{ steps.gen.outputs.is_dev }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,16 +27,26 @@ jobs:
       - name: Generate version tag
         id: gen
         run: |
-          TAG="v$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)"
+          BASE_TAG="v$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)"
+          
+          if [ "${{ github.ref_name }}" = "dev" ]; then
+            TAG="${BASE_TAG}-dev"
+            echo "is_dev=true" >> $GITHUB_OUTPUT
+          else
+            TAG="${BASE_TAG}"
+            echo "is_dev=false" >> $GITHUB_OUTPUT
+          fi
+          
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Version: $TAG"
 
       - name: Create git tag
         run: |
           git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "github-actions[bot]@://github.com"
           git tag ${{ steps.gen.outputs.tag }}
           git push origin ${{ steps.gen.outputs.tag }}
+
 
   # ── Windows EXE ──────────────────────────────────────────────────────────────
   build-windows:
@@ -58,12 +70,13 @@ jobs:
       - name: Package ZIP
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force release | Out-Null
+          New-Item -ItemType Directory -Force release/Modules | Out-Null
           Copy-Item dist\WorkshopDL.exe release\
-          if (Test-Path lang_en.json) { Copy-Item lang_en.json release\ }
-          if (Test-Path lang_ru.json) { Copy-Item lang_ru.json release\ }
-          if (Test-Path lang)         { Copy-Item lang release\lang -Recurse }
+          if (Test-Path lang) {
+              Copy-Item lang release\Modules\ -Recurse -Force
+          }
           Compress-Archive -Path release\* -DestinationPath WorkshopDL-windows.zip
+
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -102,11 +115,9 @@ jobs:
 
       - name: Package tar.gz
         run: |
-          mkdir release
+          mkdir -p release/Modules
           cp dist/WorkshopDL release/
-          [ -f lang_en.json ] && cp lang_en.json release/
-          [ -f lang_ru.json ] && cp lang_ru.json release/
-          [ -d lang ] && cp -r lang release/lang
+          [ -d lang ] && cp -r lang release/Modules/
           cd release && tar -czf ../WorkshopDL-linux.tar.gz .
 
       - name: Upload artifact
@@ -138,11 +149,16 @@ jobs:
 
       - name: Package ZIP
         run: |
-          mkdir release
-          [ -d dist/WorkshopDL.app ] && cp -r dist/WorkshopDL.app release/ || cp dist/WorkshopDL release/
-          [ -f lang_en.json ] && cp lang_en.json release/
-          [ -f lang_ru.json ] && cp lang_ru.json release/
-          [ -d lang ] && cp -r lang release/lang
+          mkdir -p release/Modules
+          if [ -d dist/WorkshopDL.app ]; then
+            cp -r dist/WorkshopDL.app release/
+            TARGET_DIR="release/WorkshopDL.app/Contents/Resources/Modules"
+            mkdir -p "$TARGET_DIR"
+            [ -d lang ] && cp -r lang "$TARGET_DIR/"
+          else
+            cp dist/WorkshopDL release/
+          fi
+          [ -d lang ] && cp -r lang release/Modules/
           cd release && zip -r ../WorkshopDL-macos.zip .
 
       - name: Upload artifact
@@ -163,31 +179,27 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
-          name: "WorkshopDL ${{ needs.version.outputs.tag }}"
+          
+          name: ${{ needs.version.outputs.is_dev == 'true' && format('[Dev Build] WorkshopDL {0}', needs.version.outputs.tag) || format('WorkshopDL {0}', needs.version.outputs.tag) }}
+          
           body: |
             ## WorkshopDL ${{ needs.version.outputs.tag }}
-            > Автосборка при изменении `workshopdl.py`
+            ${{ needs.version.outputs.is_dev == 'true' && '> ⚠️ ВНИМАНИЕ: Это тестовая сборка из ветки разработки (dev)!' || '> Автоматический выпуск релиза.' }}
 
-            ### 📦 Файлы
-            | Файл | Платформа |
-            |------|-----------|
-            | `WorkshopDL.exe` | Windows (только exe) |
-            | `WorkshopDL-windows.zip` | Windows (exe + языки) |
-            | `WorkshopDL-linux.tar.gz` | Linux |
-            | `WorkshopDL-macos.zip` | macOS |
+            ### 📦 Файлы сборки
+            * **Windows (Архив со вложенными языками):** `WorkshopDL-windows.zip`
+            * **Linux (Для Steam Deck / Desktop):** `WorkshopDL-linux.tar.gz`
+            * **macOS (Архив приложения):** `WorkshopDL-macos.zip`
 
-            ### 🚀 Быстрый старт
-            1. Скачай архив для своей платформы и распакуй
-            2. Запусти `WorkshopDL.exe` (Windows) или `WorkshopDL` (Linux/macOS)
-            3. В настройках нажми **⬇ Скачать SteamCMD автоматически**
-
-            ### 🌐 Языки
-            Английский и русский включены. Другие — кнопка **⟳** в настройках.
-
+            ### 🌐 Локализация
+            Все базовые языки теперь зашиты напрямую в исполняемые файлы программы.
           files: |
             windows-build/dist/WorkshopDL.exe
             windows-build/WorkshopDL-windows.zip
             linux-build/WorkshopDL-linux.tar.gz
             macos-build/WorkshopDL-macos.zip
+            
+          # Если это dev-ветка, релиз автоматически получит плашку Pre-release
+          prerelease: ${{ needs.version.outputs.is_dev == 'true' }}
           draft: false
-          prerelease: false
+
