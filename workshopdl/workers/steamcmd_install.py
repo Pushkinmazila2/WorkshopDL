@@ -2,7 +2,7 @@
 Воркер скачки SteamCMD.
 """
 
-import os, re, subprocess, urllib.request, zipfile, tarfile
+import os, re, subprocess, urllib.request, zipfile, tarfile, ssl
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from workshopdl.config import APP_DIR, STEAMCMD_BIN, STEAMCMD_DL_URL, STEAMCMD_ARCHIVE_IS_ZIP, IS_WIN
@@ -40,11 +40,13 @@ class SteamCMDInstallWorker(QThread):
         self.percent.emit(0)
 
         try:
+            ssl_context = ssl._create_unverified_context()
+
             req = urllib.request.Request(
                 STEAMCMD_DL_URL,
                 headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
             )
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=30, context=ssl_context) as response:
                 total_size = int(response.headers.get('Content-Length', 0))
                 downloaded = 0
                 block_size = 65536
