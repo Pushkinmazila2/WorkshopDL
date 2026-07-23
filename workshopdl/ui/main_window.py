@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QMetaObject, Q_ARG
 
 from workshopdl.config import (
-    APP_DIR, load_config, cfg_get, open_folder,
+    STEAMCMD_DEF, APP_DIR, load_config, cfg_get, open_folder,
     DISABLED_SUFFIX, mod_toggle,
     install_repo_url, GITHUB_INSTALL_RAW, GITHUB_INSTALL_API,
 )
