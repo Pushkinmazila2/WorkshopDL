@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QUrl, pyqtSlot, QMetaObject, Q_ARG
 from PyQt5.QtGui import QFont, QColor, QBrush, QDesktopServices
 
+
 from workshopdl.localization import t
 from workshopdl.config import cfg_get, open_folder, DISABLED_SUFFIX, mod_toggle
 from workshopdl.storage import mod_paths_load, mod_paths_save, mod_paths_add
@@ -242,25 +243,39 @@ class UpdatesTabMixin:
 
     # ── Клики по таблице ────────────────────────────────────────────────────
     def _upd_table_clicked(self, row, col):
+        import webbrowser # Используем стандартный модуль, чтобы не зависеть от QUrl
+
+        # 1. КЛИК ПО ССЫЛКЕ STEAM (Колонка 3)
         if col == 3:
-            id_item = self.upd_table.item(row, 2)
-            if id_item:
-                QDesktopServices.openUrl(QUrl(
-                    f"https://steamcommunity.com/sharedfiles/filedetails/?id={id_item.text()}"))
+            # Забираем ID мода из скрытых данных (UserRole) самой ячейки Steam
+            steam_item = self.upd_table.item(row, 3)
+            if steam_item:
+                mod_id = steam_item.data(Qt.UserRole)
+                if mod_id:
+                    webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod_id}")
+
+        # 2. КЛИК ПО ПЕРЕКЛЮЧАТЕЛЮ ВКЛ/ВЫКЛ (Колонка 4)
         elif col == 4:
             tog = self.upd_table.item(row, 4)
             if tog:
                 mod_id = tog.data(Qt.UserRole)
                 folder = tog.data(Qt.UserRole + 1)
+                
                 new_folder = mod_toggle(folder)
                 was_disabled = folder.endswith(DISABLED_SUFFIX)
-                new_status = "ok" if was_disabled else "disabled"
-                new_icon   = "🔘" if not was_disabled else "🟢"
-                new_lbl    = "▶ Включить" if not was_disabled else "⏸ Выкл"
+                
+                # Меняем статус-иконку в первой колонке (0)
+                new_icon = "🔘" if not was_disabled else "🟢"
                 self.upd_table.item(row, 0).setText(new_icon)
+                
+                # Меняем текст на кнопке переключения
+                new_lbl = "▶ Включить" if not was_disabled else "⏸ Выкл"
                 tog.setText(new_lbl)
                 tog.setData(Qt.UserRole + 1, new_folder)
+
+        # 3. КЛИК ПО ПАПКЕ (Колонка 5)
         elif col == 5:
+            # Данные папки хранятся в ячейке колонки 4
             fold_item = self.upd_table.item(row, 4)
             if fold_item:
                 folder = fold_item.data(Qt.UserRole + 1)
