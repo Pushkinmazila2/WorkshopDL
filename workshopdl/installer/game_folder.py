@@ -4,7 +4,7 @@
 
 import os, glob
 
-from workshopdl.config import IS_WIN
+from workshopdl.config import IS_WIN,IS_MAC
 
 
 def _find_steam_path() -> str:
