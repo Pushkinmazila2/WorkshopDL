@@ -7,8 +7,8 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
     QLabel, QListWidget, QGroupBox, QProgressBar, QTextEdit,
 )
-from PyQt5.QtCore import Qt, pyqtSlot
-from PyQt5.QtGui import QFont, QDesktopServices, QUrl
+from PyQt5.QtCore import Qt, QUrl, pyqtSlot
+from PyQt5.QtGui import QFont, QDesktopServices
 
 from workshopdl.config import cfg_get
 from workshopdl.localization import t
