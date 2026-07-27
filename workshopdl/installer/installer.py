@@ -5,6 +5,12 @@
 import os, json, re, glob, shutil, zipfile, importlib, requests
 import xml.etree.ElementTree as ET
 
+import inspect
+import tkinter as tk
+from tkinter import messagebox
+from functools import wraps
+
+
 from workshopdl.config import IS_WIN, IS_MAC, IS_LINUX, INSTALL_LOCAL_DIR
 from workshopdl.storage import history_set_game_folder
 from workshopdl.installer.game_folder import _pf_find_game_folder, _find_steam_path
@@ -16,7 +22,53 @@ from workshopdl.installer.utils import (
 from workshopdl.installer.conditions import _pf_safe_eval_condition, _build_tpl
 from workshopdl.installer.patchers import _pf_patch_ini, _pf_patch_json, _pf_patch_xml, _pf_patch_cfg
 
+def debug_class_methods(cls):
+    """Декоратор класса, который автоматически оборачивает все его методы в try-except."""
+    
+    # Вспомогательная функция для показа окна
+    def show_error_popup(method_name, exception):
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(
+            "Ошибка в компоненте",
+            f"Произошел сбой в методе: {cls.__name__}.{method_name}\n\n"
+            f"Тип ошибки: {type(exception).__name__}\n"
+            f"Текст: {exception}"
+        )
+        root.destroy()
 
+    # Перебираем все атрибуты класса
+    for attr_name, attr_value in list(cls.__dict__.items()):
+        # Проверяем, что это именно функция/метод (игнорируем служебные, кроме __init__)
+        if inspect.isfunction(attr_value) or isinstance(attr_value, (classmethod, staticmethod)):
+            
+            # Проверяем, является ли метод classmethod или staticmethod
+            is_classmethod = isinstance(attr_value, classmethod)
+            is_staticmethod = isinstance(attr_value, staticmethod)
+            
+            # Достаем чистую функцию
+            original_func = attr_value.__func__ if (is_classmethod or is_staticmethod) else attr_value
+
+            @wraps(original_func)
+            def decorator_wrapper(*args, func_to_call=original_func, name=attr_name, **kwargs):
+                try:
+                    return func_to_call(*args, **kwargs)
+                except Exception as e:
+                    show_error_popup(name, e)
+                    return None  # Или другое дефолтное значение при падении метода
+
+            # Возвращаем обертку обратно в класс с сохранением типа метода
+            if is_classmethod:
+                setattr(cls, attr_name, classmethod(decorator_wrapper))
+            elif is_staticmethod:
+                setattr(cls, attr_name, staticmethod(decorator_wrapper))
+            else:
+                setattr(cls, attr_name, decorator_wrapper)
+                
+    return cls
+
+
+@debug_class_methods
 class ModInstaller:
     """
     Выполняет установку одного мода согласно инструкции (recipe).
