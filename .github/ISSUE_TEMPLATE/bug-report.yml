@@ -15,3 +15,17 @@ body:
       placeholder: "1. Go to... / 1. Перейдите в..."
     validations:
       required: true
+  - type: textarea
+    id: crash_log_file
+    attributes:
+      label: "Attach crash.log / Прикрепите crash.log"
+      description: |
+        You can find 'crash.log' in the main directory next to the executable file. 
+        Drag and drop your file here, or click to select it.
+        ---
+        Вы можете найти 'crash.log' в главной директории рядом с исполняемым файлом. 
+        Перетащите файл сюда или нажмите для выбора.
+      placeholder: "Attach your crash.log by dragging and dropping it here / Прикрепите crash.log, перетащив его сюда"
+    validations:
+      required: false
+
