@@ -281,10 +281,17 @@ class InstallDialog(QDialog):
             extra_ctx=self.extra_ctx,
         )
         self._worker.log_line.connect(self._log_append)
-        self._worker.progress.connect(lambda c, t: self._progress.setValue(c))
+        #self._worker.progress.connect(lambda c, t: self._progress.setValue(c))
+        self._worker.progress.connect(self._update_progress_bar)
         self._worker.mod_status.connect(self._on_mod_status)
         self._worker.finished.connect(self._on_finished)
+        self._worker.finished.connect(self._worker.deleteLater) 
         self._worker.start()
+
+    def _update_progress_bar(self, current, total):
+        if total > 0:
+            percent = int((current / total) * 100)
+            self._progress.setValue(percent)
 
     def _log_append(self, text: str):
         self._log.append(text)
