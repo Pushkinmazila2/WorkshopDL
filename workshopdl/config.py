@@ -63,6 +63,10 @@ HISTORY_PATH   = os.path.join(MODULES_PATH, "history.json")
 MOD_PATHS_PATH = os.path.join(MODULES_PATH, "mod_paths.json")
 LANG_DEF_PATH  = os.path.join(APP_DIR, "lang_en.json")   # английский — базовый язык
 
+# ── Автообновление программы ──────────────────────────────────────────────────
+UPDATE_TEMP_DIR   = os.path.join(MODULES_PATH, "update")
+UPDATE_CHANNEL_DEFAULT = "stable"  # "stable" | "dev"
+
 # ── GitHub-интеграция языков ──────────────────────────────────────────────────
 GITHUB_REPO      = "Pushkinmazila2/WorkshopDL"
 GITHUB_LANG_API  = f"https://api.github.com/repos/{GITHUB_REPO}/contents/lang"

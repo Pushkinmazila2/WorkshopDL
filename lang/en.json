@@ -159,5 +159,22 @@
   "log_result": "✅ Succeeded: {success}    ❌ Failed: {fail}",
   "log_paused": "⏸  Paused — progress saved.",
   "log_paused_remaining": "⏸  Paused. Remaining: {remaining} mods.",
-  "open_folder_q": "Open the downloaded mods folder?"
+  "open_folder_q": "Open the downloaded mods folder?",
+  "settings_update_group": "🔄 Program Updates",
+  "settings_current_version": "Current version:",
+  "settings_update_channel": "Update channel:",
+  "settings_update_channel_stable": "Stable",
+  "settings_update_channel_dev": "Dev (Pre-release)",
+  "settings_check_update": "🔍 Check for Updates",
+  "settings_update_checking": "Checking...",
+  "settings_update_error": "❌ Error: {error}",
+  "settings_update_dl_error": "❌ Download error: {error}",
+  "msg_update_available": "New version {version} ({channel}) available",
+  "msg_update_downloading": "Downloading update...",
+  "msg_update_downloading_progress": "Downloading: {percent}%",
+  "msg_update_done": "✅ Update downloaded",
+  "msg_update_apply": "Restart the program to apply the update?",
+  "btn_update": "✅ Update",
+  "btn_skip": "⏭ Skip",
+  "status_no_update": "✅ You have the latest version"
 }

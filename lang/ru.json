@@ -159,5 +159,22 @@
   "log_result": "✅ Успешно: {success}    ❌ Ошибок: {fail}",
   "log_paused": "⏸  Пауза — прогресс сохранён.",
   "log_paused_remaining": "⏸  Пауза. Осталось {remaining} модов.",
-  "open_folder_q": "Открыть папку со скачанными модами?"
+  "open_folder_q": "Открыть папку со скачанными модами?",
+  "settings_update_group": "🔄 Обновления программы",
+  "settings_current_version": "Текущая версия:",
+  "settings_update_channel": "Канал обновлений:",
+  "settings_update_channel_stable": "Stable",
+  "settings_update_channel_dev": "Dev (Pre-release)",
+  "settings_check_update": "🔍 Проверить обновления",
+  "settings_update_checking": "Проверка...",
+  "settings_update_error": "❌ Ошибка: {error}",
+  "settings_update_dl_error": "❌ Ошибка скачивания: {error}",
+  "msg_update_available": "Доступна новая версия {version} ({channel})",
+  "msg_update_downloading": "Скачивание обновления...",
+  "msg_update_downloading_progress": "Скачивание: {percent}%",
+  "msg_update_done": "✅ Обновление скачано",
+  "msg_update_apply": "Перезапустить программу для применения обновления?",
+  "btn_update": "✅ Обновить",
+  "btn_skip": "⏭ Пропустить",
+  "status_no_update": "✅ У вас актуальная версия"
 }

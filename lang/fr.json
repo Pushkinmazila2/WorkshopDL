@@ -159,5 +159,22 @@
   "log_result": "✅ Complétés: {success}    ❌ Échecs: {fail}",
   "log_paused": "⏸  Interrompue — Progression sauvegarder.",
   "log_paused_remaining": "⏸  Interrompue. {remaining} mods restant",
-  "open_folder_q": "Ouvrir le dossier des mods téléchargé?"
+  "open_folder_q": "Ouvrir le dossier des mods téléchargé?",
+  "settings_update_group": "🔄 Mises à jour du programme",
+  "settings_current_version": "Version actuelle:",
+  "settings_update_channel": "Canal de mise à jour:",
+  "settings_update_channel_stable": "Stable",
+  "settings_update_channel_dev": "Dev (Pre-release)",
+  "settings_check_update": "🔍 Vérifier les mises à jour",
+  "settings_update_checking": "Vérification...",
+  "settings_update_error": "❌ Erreur: {error}",
+  "settings_update_dl_error": "❌ Erreur de téléchargement: {error}",
+  "msg_update_available": "Nouvelle version {version} ({channel}) disponible",
+  "msg_update_downloading": "Téléchargement de la mise à jour...",
+  "msg_update_downloading_progress": "Téléchargement: {percent}%",
+  "msg_update_done": "✅ Mise à jour téléchargée",
+  "msg_update_apply": "Redémarrer le programme pour appliquer la mise à jour?",
+  "btn_update": "✅ Mettre à jour",
+  "btn_skip": "⏭ Ignorer",
+  "status_no_update": "✅ Vous avez la dernière version"
 }

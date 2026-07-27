@@ -20,8 +20,10 @@ from workshopdl.config import (
     STEAMCMD_DEF, APP_DIR, load_config, cfg_get, open_folder,
     DISABLED_SUFFIX, mod_toggle,
     install_repo_url, GITHUB_INSTALL_RAW, GITHUB_INSTALL_API,
+    UPDATE_CHANNEL_DEFAULT,
 )
 from workshopdl.localization import t
+from workshopdl.workers.app_update_worker import AppUpdateWorker
 from workshopdl.storage import (
     history_add, history_get_name, history_get_game_folder,
     mod_paths_add,
@@ -64,6 +66,7 @@ class MainWindow(QMainWindow,
         self._load_settings()
         self._scan_and_refresh_history()
         self._check_resume()
+        self._check_app_updates_startup()
 
     # ── UI ────────────────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -281,3 +284,60 @@ class MainWindow(QMainWindow,
         if added:
             self.tabs.setCurrentIndex(0)
             self._log(f"🔗 Добавлено {added} зависимост(ей) — нажмите ⬇ Скачать")
+
+    # ── Автообновление программы при запуске ─────────────────────────────────
+    def _check_app_updates_startup(self):
+        """Фоновая проверка обновлений при запуске программы."""
+        channel = cfg_get(self.cfg, "WorkshopDL", "UpdateChannel", UPDATE_CHANNEL_DEFAULT)
+
+        self._startup_update_worker = AppUpdateWorker(channel=channel)
+        self._startup_update_worker.update_available.connect(self._on_startup_update_available)
+        self._startup_update_worker.no_update.connect(self._on_startup_no_update)
+        self._startup_update_worker.check_error.connect(self._on_startup_update_error)
+        self._startup_update_worker.download_progress.connect(self._on_startup_dl_progress)
+        self._startup_update_worker.download_done.connect(self._on_startup_dl_done)
+        self._startup_update_worker.download_error.connect(self._on_startup_dl_error)
+        self._startup_update_worker.start()
+
+    def _on_startup_update_available(self, version: str, url: str, body: str, prerelease: bool):
+        channel_label = "Dev" if prerelease else "Stable"
+        msg = QMessageBox(self)
+        msg.setWindowTitle(t("app_title"))
+        msg.setIcon(QMessageBox.Question)
+        msg.setText(t("msg_update_available", version=version, channel=channel_label))
+        if body:
+            preview = body[:500]
+            if len(body) > 500:
+                preview += "..."
+            msg.setDetailedText(preview)
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.Yes)
+        msg.button(QMessageBox.Yes).setText(t("btn_update"))
+        msg.button(QMessageBox.No).setText(t("btn_skip"))
+
+        if msg.exec_() == QMessageBox.Yes:
+            self._startup_update_worker._update_info = {"download_url": url}
+            self._startup_update_worker._download_mode = True
+            self._startup_update_worker.start()
+
+    def _on_startup_no_update(self):
+        pass  # Всё ок, ничего не показываем
+
+    def _on_startup_update_error(self, error_msg: str):
+        pass  # Молча игнорируем ошибки при старте
+
+    def _on_startup_dl_progress(self, current: int, total: int):
+        pass  # Прогресс не показываем при старте
+
+    def _on_startup_dl_done(self, archive_path: str):
+        reply = QMessageBox.question(
+            self, t("app_title"),
+            t("msg_update_apply"),
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            from workshopdl.updater import apply_update
+            apply_update(archive_path)
+
+    def _on_startup_dl_error(self, error_msg: str):
+        pass  # Молча игнорируем

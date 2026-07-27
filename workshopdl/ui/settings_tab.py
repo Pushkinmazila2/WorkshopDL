@@ -15,8 +15,10 @@ from workshopdl.config import (
     cfg_get, save_config, STEAMCMD_DEF, STEAMCMD_BIN, IS_WIN,
     LANG_DEF_PATH, INSTALL_LOCAL_DIR, INSTALL_REPO_DEFAULT,
     INSTALL_PATH_DEFAULT, GITHUB_INSTALL_RAW, GITHUB_INSTALL_API,
-    install_repo_url, APP_DIR,
+    install_repo_url, APP_DIR, UPDATE_CHANNEL_DEFAULT,
 )
+from workshopdl import __version__
+from workshopdl.workers.app_update_worker import AppUpdateWorker
 from workshopdl.localization import (
     t, lang_load, lang_list_local, lang_local_path, LangFetchWorker,
 )
@@ -207,6 +209,46 @@ class SettingsTabMixin:
         self._refresh_install_cache_info()
         lay.addWidget(grp_inst)
 
+        # ── Секция обновлений ───────────────────────────────────────────────
+        grp_upd = QGroupBox(t("settings_update_group"))
+        gu = QVBoxLayout(grp_upd)
+
+        row_ver = QHBoxLayout()
+        row_ver.addWidget(QLabel(t("settings_current_version")))
+        self.lbl_current_version = QLabel(__version__)
+        self.lbl_current_version.setStyleSheet("font-weight: bold;")
+        row_ver.addWidget(self.lbl_current_version)
+        row_ver.addStretch()
+        gu.addLayout(row_ver)
+
+        row_channel = QHBoxLayout()
+        row_channel.addWidget(QLabel(t("settings_update_channel")))
+        self.cmb_update_channel = QComboBox()
+        self.cmb_update_channel.addItem(t("settings_update_channel_stable"), userData="stable")
+        self.cmb_update_channel.addItem(t("settings_update_channel_dev"), userData="dev")
+        row_channel.addWidget(self.cmb_update_channel)
+        row_channel.addStretch()
+        gu.addLayout(row_channel)
+
+        row_check = QHBoxLayout()
+        self.btn_check_update = QPushButton(t("settings_check_update"))
+        self.btn_check_update.setFixedHeight(32)
+        self.btn_check_update.clicked.connect(self._check_update)
+        row_check.addWidget(self.btn_check_update)
+        self.lbl_update_status = QLabel("")
+        self.lbl_update_status.setStyleSheet("color: Palette(PlaceholderText);")
+        row_check.addWidget(self.lbl_update_status)
+        row_check.addStretch()
+        gu.addLayout(row_check)
+
+        # Прогресс-бар для скачивания
+        self.pb_update_dl = QProgressBar()
+        self.pb_update_dl.setFixedHeight(18)
+        self.pb_update_dl.setVisible(False)
+        gu.addWidget(self.pb_update_dl)
+
+        lay.addWidget(grp_upd)
+
         btn_save = QPushButton(t("settings_save"))
         btn_save.clicked.connect(self._save_settings)
         lay.addWidget(btn_save); lay.addStretch()
@@ -280,6 +322,9 @@ class SettingsTabMixin:
             self.cfg["WorkshopDL"].pop("InstallRepo", None)
         global GITHUB_INSTALL_RAW, GITHUB_INSTALL_API
         GITHUB_INSTALL_RAW, GITHUB_INSTALL_API = install_repo_url(self.cfg)
+
+        # Сохраняем канал обновлений
+        self.cfg["WorkshopDL"]["UpdateChannel"] = self.cmb_update_channel.currentData()
 
         save_config(self.cfg)
         QMessageBox.information(self, t("app_title"), t("msg_settings_saved"))
@@ -585,5 +630,115 @@ class SettingsTabMixin:
         self._refresh_history()
         self._refresh_steamcmd_status()
         self._populate_lang_combo_local()
+        # Загружаем канал обновлений
+        channel = cfg_get(self.cfg, "WorkshopDL", "UpdateChannel", UPDATE_CHANNEL_DEFAULT)
+        for i in range(self.cmb_update_channel.count()):
+            if self.cmb_update_channel.itemData(i) == channel:
+                self.cmb_update_channel.setCurrentIndex(i)
+                break
+
         self.tabs.setCurrentIndex(old_tab)
         self.setWindowTitle(t("app_title"))
+
+    # ── Обновления программы ────────────────────────────────────────────────
+    def _check_update(self):
+        """Проверяет наличие обновления программы."""
+        channel = self.cmb_update_channel.currentData()
+        self.btn_check_update.setEnabled(False)
+        self.lbl_update_status.setText(t("settings_update_checking"))
+        self.lbl_update_status.setStyleSheet("color: Palette(PlaceholderText);")
+        self.pb_update_dl.setVisible(False)
+
+        self._update_worker = AppUpdateWorker(channel=channel)
+        self._update_worker.update_available.connect(self._on_update_available)
+        self._update_worker.no_update.connect(self._on_no_update)
+        self._update_worker.check_error.connect(self._on_update_check_error)
+        self._update_worker.download_progress.connect(self._on_update_dl_progress)
+        self._update_worker.download_done.connect(self._on_update_dl_done)
+        self._update_worker.download_error.connect(self._on_update_dl_error)
+        self._update_worker.start()
+
+    def _on_update_available(self, version: str, url: str, body: str, prerelease: bool):
+        self.btn_check_update.setEnabled(True)
+        channel_label = "Dev" if prerelease else "Stable"
+        self.lbl_update_status.setText(
+            t("msg_update_available", version=version, channel=channel_label)
+        )
+        self.lbl_update_status.setStyleSheet("color: #4CAF50; font-weight: bold;")
+
+        # Показываем диалог
+        msg = QMessageBox(self)
+        msg.setWindowTitle(t("app_title"))
+        msg.setIcon(QMessageBox.Question)
+        msg.setText(t("msg_update_available", version=version, channel=channel_label))
+        if body:
+            # Показываем первые 500 символов release notes
+            preview = body[:500]
+            if len(body) > 500:
+                preview += "..."
+            msg.setDetailedText(preview)
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.Yes)
+        msg.button(QMessageBox.Yes).setText(t("btn_update"))
+        msg.button(QMessageBox.No).setText(t("btn_skip"))
+
+        if msg.exec_() == QMessageBox.Yes:
+            self._start_update_download(url)
+
+    def _on_no_update(self):
+        self.btn_check_update.setEnabled(True)
+        self.lbl_update_status.setText(t("status_no_update"))
+        self.lbl_update_status.setStyleSheet("color: Palette(Link);")
+
+    def _on_update_check_error(self, error_msg: str):
+        self.btn_check_update.setEnabled(True)
+        self.lbl_update_status.setText(t("settings_update_error", error=error_msg))
+        self.lbl_update_status.setStyleSheet("color: #f44336;")
+
+    def _start_update_download(self, url: str):
+        """Начинает скачивание обновления."""
+        self.btn_check_update.setEnabled(False)
+        self.pb_update_dl.setVisible(True)
+        self.pb_update_dl.setValue(0)
+        self.lbl_update_status.setText(t("msg_update_downloading"))
+        self.lbl_update_status.setStyleSheet("color: Palette(PlaceholderText);")
+
+        # Создаём новый worker для скачивания
+        self._dl_worker = AppUpdateWorker()
+        self._dl_worker.download_progress.connect(self._on_update_dl_progress)
+        self._dl_worker.download_done.connect(self._on_update_dl_done)
+        self._dl_worker.download_error.connect(self._on_update_dl_error)
+        self._dl_worker._update_info = {"download_url": url}
+        self._dl_worker._download_mode = True
+        self._dl_worker.start()
+
+    def _on_update_dl_progress(self, current: int, total: int):
+        if total > 0:
+            percent = int(current * 100 / total)
+            self.pb_update_dl.setValue(percent)
+            self.lbl_update_status.setText(
+                t("msg_update_downloading_progress", percent=percent)
+            )
+
+    def _on_update_dl_done(self, archive_path: str):
+        self.btn_check_update.setEnabled(True)
+        self.pb_update_dl.setVisible(False)
+        self.lbl_update_status.setText(t("msg_update_done"))
+        self.lbl_update_status.setStyleSheet("color: #4CAF50; font-weight: bold;")
+
+        # Спрашиваем, применить ли обновление
+        reply = QMessageBox.question(
+            self, t("app_title"),
+            t("msg_update_apply"),
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            from workshopdl.updater import apply_update
+            apply_update(archive_path)
+            # apply_update завершает процесс, сюда не дойдём
+
+    def _on_update_dl_error(self, error_msg: str):
+        self.btn_check_update.setEnabled(True)
+        self.pb_update_dl.setVisible(False)
+        self.lbl_update_status.setText(t("settings_update_dl_error", error=error_msg))
+        self.lbl_update_status.setStyleSheet("color: #f44336;")
