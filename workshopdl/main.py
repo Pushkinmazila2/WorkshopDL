@@ -5,7 +5,7 @@
 import sys
 import os
 import traceback
-from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtWidgets import QApplication, QMessageBox, QWidget
 from PyQt5.QtCore import qInstallMessageHandler
 
 from workshopdl.config import MODULES_PATH
