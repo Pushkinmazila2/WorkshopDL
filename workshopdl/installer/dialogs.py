@@ -5,7 +5,7 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QListWidget,
     QLabel, QTextEdit, QGroupBox, QCheckBox, QMessageBox, QProgressBar,
-    QComboBox, QFileDialog, QDialogButtonBox, QScrollArea, QFrame
+    QComboBox, QFileDialog, QDialogButtonBox, QScrollArea, QFrame, QWidget
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
