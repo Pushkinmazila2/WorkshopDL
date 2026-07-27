@@ -159,12 +159,9 @@ class UpdatesTabMixin:
         self.upd_worker.missing_deps.connect(self._on_missing_deps_found)
         self.upd_worker.start()
 
-    # ── Результат ───────────────────────────────────────────────────────────
     def _on_upd_result(self, mod_id, title, local_ts, server_ts, status, folder, size_mb, mod_missing):
         local_dt  = datetime.datetime.fromtimestamp(local_ts).strftime("%Y-%m-%d %H:%M") if local_ts else "—"
         server_dt = datetime.datetime.fromtimestamp(server_ts).strftime("%Y-%m-%d %H:%M") if server_ts else "—"
-        loc_item = cell(local_dt, int(local_ts) if local_ts else 0)
-        srv_item = cell(server_dt, server_ts)
 
         COLOR = {"outdated": "#fde8e8", "ok": "#e8fde8",
                  "disabled": "#f0f0f0", "unknown": "#fafafa"}
@@ -174,10 +171,7 @@ class UpdatesTabMixin:
         if status == "outdated": self._outdated_ids.append(mod_id)
         row_color = QColor(COLOR[status])
 
-        row = self.upd_table.rowCount()
-        self.upd_table.insertRow(row)
-        self._upd_rows[mod_id] = row
-
+        # 1. ОБЪЯВЛЯЕМ ОПРЕДЕЛЕНИЕ ФУНКЦИИ cell() ЗДЕСЬ (чтобы row_color уже был доступен)
         def cell(text, sort_val=None, align=Qt.AlignCenter):
             it = QTableWidgetItem(text)
             it.setBackground(QBrush(row_color))
@@ -185,33 +179,46 @@ class UpdatesTabMixin:
             if sort_val is not None: it.setData(Qt.UserRole, sort_val)
             return it
 
+        # Теперь работаем с таблицей
+        row = self.upd_table.rowCount()
+        self.upd_table.insertRow(row)
+        self._upd_rows[mod_id] = row
+
         has_missing = bool(mod_missing)
         status_icon = ICON[status] + (" ⚠" if has_missing else "")
         st_item = cell(status_icon, SORT[status])
+        
         tip = t(f"status_{status}")
         if has_missing:
             deps_text = "\n".join(f"  • {mid}: {name}" for mid, name in mod_missing)
             tip += f"\n\n⚠ Отсутствующие зависимости ({len(mod_missing)}):\n{deps_text}"
         st_item.setToolTip(tip)
+        
         name_item = QTableWidgetItem(title if title != mod_id else "—")
         name_item.setForeground(QBrush(QColor("#000000")))
         name_item.setBackground(QBrush(row_color))
         name_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         if has_missing:
             name_item.setToolTip(f"⚠ {len(mod_missing)} зависимост(ей) не скачаны")
+            
         size_str = f"{size_mb:.1f} MB" if size_mb >= 1 else f"{size_mb*1024:.0f} KB"
         sz_item = cell(size_str, size_mb)
         sz_item.setForeground(QBrush(QColor("#000000")))
+        
         steam_item = cell("🔗", mod_id)
         steam_item.setForeground(QBrush(QColor("#1a73e8")))
         steam_item.setToolTip(f"steamcommunity.com/sharedfiles/filedetails/?id={mod_id}")
+        
         toggle_label = "▶ Включить" if status == "disabled" else "⏸ Выкл"
         tog_item = cell(toggle_label, mod_id)
         tog_item.setForeground(QBrush(QColor("#2980b9")))
         tog_item.setData(Qt.UserRole + 1, folder)
+        
         folder_item = cell("📁", mod_id)
         folder_item.setForeground(QBrush(QColor("#27ae60")))
         folder_item.setToolTip(folder)
+        
+        # 2. Вызов cell() происходит здесь, когда функция уже полностью определена выше
         loc_item = cell(local_dt, int(local_ts) if local_ts else 0)
         srv_item = cell(server_dt, server_ts)
         loc_item.setForeground(QBrush(QColor("#000000")))
@@ -225,25 +232,6 @@ class UpdatesTabMixin:
             f = QFont(); f.setBold(True)
             for col in [0, 1, 2]: self.upd_table.item(row, col).setFont(f)
 
-    def _on_upd_finished(self, outdated, ok_count):
-        self.upd_table.setSortingEnabled(True)
-        self.upd_table.sortByColumn(0, Qt.AscendingOrder)
-        self.btn_check_upd.setEnabled(True)
-        disabled = sum(1 for r in range(self.upd_table.rowCount())
-                       if self.upd_table.item(r, 0) and self.upd_table.item(r, 0).text().startswith("🔘"))
-        has_outdated = bool(self._outdated_ids)
-        self.btn_update_all.setEnabled(has_outdated)
-        self.btn_update_sel.setEnabled(has_outdated)
-        self.btn_enable_all.setEnabled(True)
-        self.btn_disable_all.setEnabled(True)
-        total = self.upd_table.rowCount()
-        self.upd_status.setText(
-            t("upd_status_template", total=total, outdated=outdated,
-              ok=ok_count, disabled=disabled)
-        )
-
-    def _on_missing_deps_found(self, deps: dict):
-        self._show_deps_dialog(deps, source="updates")
 
     # ── Клики по таблице ────────────────────────────────────────────────────
     def _upd_table_clicked(self, row, col):
