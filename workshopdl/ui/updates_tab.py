@@ -163,7 +163,9 @@ class UpdatesTabMixin:
     def _on_upd_result(self, mod_id, title, local_ts, server_ts, status, folder, size_mb, mod_missing):
         local_dt  = datetime.datetime.fromtimestamp(local_ts).strftime("%Y-%m-%d %H:%M") if local_ts else "—"
         server_dt = datetime.datetime.fromtimestamp(server_ts).strftime("%Y-%m-%d %H:%M") if server_ts else "—"
-
+        loc_item = cell(local_dt, int(local_ts) if local_ts else 0)
+        srv_item = cell(server_dt, server_ts)
+        
         COLOR = {"outdated": "#fde8e8", "ok": "#e8fde8",
                  "disabled": "#f0f0f0", "unknown": "#fafafa"}
         ICON  = {"outdated": "🔴", "ok": "🟢", "disabled": "🔘", "unknown": "⚪"}
@@ -212,6 +214,8 @@ class UpdatesTabMixin:
         folder_item.setToolTip(folder)
         loc_item = cell(local_dt, int(local_ts) if local_ts else 0)
         srv_item = cell(server_dt, server_ts)
+        loc_item.setForeground(QBrush(QColor("#000000")))
+        srv_item.setForeground(QBrush(QColor("#000000")))
 
         for col, item in enumerate([st_item, name_item, sz_item, steam_item,
                                      tog_item, folder_item, loc_item, srv_item]):

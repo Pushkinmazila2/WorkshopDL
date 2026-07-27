@@ -35,7 +35,30 @@ class SettingsTabMixin:
 
     # ── UI ──────────────────────────────────────────────────────────────────
     def _tab_settings(self):
-        w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(10)
+        w = QWidget()
+        
+        # 1. Создаем главный слой для самой вкладки, куда встанет скролл-зона
+        main_lay = QVBoxLayout(w)
+        main_lay.setContentsMargins(0, 0, 0, 0)
+        
+        # 2. Инициализируем QScrollArea
+        from PyQt5.QtWidgets import QScrollArea, QFrame
+        scroll = QScrollArea(w)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff) # Отключаем горизонтальный скролл
+        
+        # 3. Создаем контейнер для всех элементов настроек
+        scroll_content = QWidget()
+        scroll.setWidget(scroll_content)
+        
+        # 4. Перенаправляем оригинальный слой 'lay' на работу с контейнером внутри скролла
+        lay = QVBoxLayout(scroll_content)
+        lay.setSpacing(10)
+        lay.setContentsMargins(10, 10, 10, 10)
+        
+        # Добавляем область прокрутки в главный слой вкладки
+        main_lay.addWidget(scroll)
 
         self.chk_anon = QCheckBox(t("settings_anon"))
         self.chk_anon.stateChanged.connect(self._toggle_anon)

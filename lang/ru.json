@@ -46,7 +46,7 @@
   "col_folder": "Папка",
   "col_size": "Размер",
   "col_local_date": "Локально",
-  "col_server_date": "Сервер",
+  "col_server_date": "Дата на сервере",
   "status_outdated": "🔴 Устарел",
   "status_ok": "🟢 Актуален",
   "status_unknown": "⚪ Неизвестно",
