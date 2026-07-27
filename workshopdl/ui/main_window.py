@@ -10,7 +10,7 @@
     - settings_tab.py   (SettingsTabMixin)
 """
 
-import os, re, threading
+import os, re, threading, html
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QTabWidget, QMessageBox,
 )
@@ -53,6 +53,7 @@ class MainWindow(QMainWindow,
         self.upd_worker = None
         self._outdated_ids = []
         self._upd_rows  = {}
+        self._pending_recipe = None
         self.cfg = load_config()
         self._sig_set_game_id.connect(self._slot_set_game_id)
         self._sig_log.connect(self._log)
@@ -134,6 +135,8 @@ class MainWindow(QMainWindow,
                     f"📥 Найдена инструкция установки для игры {game_id} "
                     f"({recipe.get('game_name', '')})"
                 )
+                # Store recipe so the slot doesn't need to re-fetch it
+                self._pending_recipe = recipe
                 QMetaObject.invokeMethod(
                     self, "_slot_open_install_dialog",
                     Qt.QueuedConnection,
@@ -150,7 +153,20 @@ class MainWindow(QMainWindow,
 
     @pyqtSlot(str, str)
     def _slot_open_install_dialog(self, game_id: str, content_folder: str):
-        recipe = install_fetch_recipe(game_id, cfg=self.cfg)
+        # CRITICAL: This slot is invoked via QMetaObject.invokeMethod with
+        # Qt.QueuedConnection.  Any unhandled exception here propagates
+        # through the C++ event loop and causes a segfault.  We must
+        # catch everything.
+        try:
+            self._slot_open_install_dialog_impl(game_id, content_folder)
+        except Exception as e:
+            self._log(f"❌ Ошибка при открытии диалога установки: {e}")
+
+    def _slot_open_install_dialog_impl(self, game_id: str, content_folder: str):
+        # Use the recipe fetched by _offer_install (stored in _pending_recipe)
+        # instead of re-fetching on the main thread.
+        recipe = self._pending_recipe
+        self._pending_recipe = None
         if not recipe:
             return
 
@@ -172,12 +188,18 @@ class MainWindow(QMainWindow,
         else:
             self._log(f"ℹ Папка игры для {game_name} неизвестна — будет найдена при установке")
 
-        hist_note = f"\n\n📂 Папка игры: {history_folder}" if history_folder else ""
+        # Escape HTML in dynamic content to prevent rich-text rendering issues
+        safe_name   = html.escape(str(game_name))
+        safe_id     = html.escape(str(game_id))
+        safe_desc   = html.escape(str(recipe.get('description', '')))
+        safe_folder = html.escape(str(history_folder)) if history_folder else ""
+        hist_note   = f"\n\n📂 Папка игры: {safe_folder}" if history_folder else ""
+
         reply = QMessageBox.question(
             self, "📥 Установка модов",
             f"Найдена инструкция установки для игры:\n"
-            f"<b>{game_name}</b>  (App ID: {game_id})\n\n"
-            f"{recipe.get('description', '')}{hist_note}\n\n"
+            f"<b>{safe_name}</b>  (App ID: {safe_id})\n\n"
+            f"{safe_desc}{hist_note}\n\n"
             f"Установить скачанные моды прямо сейчас?",
             QMessageBox.Yes | QMessageBox.No
         )
