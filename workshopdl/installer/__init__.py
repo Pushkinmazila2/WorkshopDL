@@ -1,17 +1,7 @@
 import os, json, requests, configparser, sys, traceback
-import tkinter as tk
-from tkinter import messagebox
+
 from workshopdl.config import INSTALL_LOCAL_DIR, install_repo_url
 
-def global_exception_handler(exctype, value, tb):
-    error_msg = "".join(traceback.format_exception(exctype, value, tb))
-    root = tk.Tk()
-    root.withdraw()
-    messagebox.showerror("Ошибка выполнения", f"Произошел сбой:\n\n{value}")
-    root.destroy()
-    sys.exit(1)
-
-sys.excepthook = global_exception_handler
 
 
 def install_fetch_recipe(game_id: str, force: bool = False,
