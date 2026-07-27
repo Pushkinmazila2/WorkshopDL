@@ -107,24 +107,16 @@ def check_for_updates(
         if not isinstance(releases, list) or len(releases) == 0:
             return None
 
+        best_stable = None
+        best_dev = None
+
         for release in releases:
             tag_name = release.get("tag_name", "")
             prerelease = release.get("prerelease", True)
-
-            # Фильтр по каналу
-            if channel == "stable" and prerelease:
-                continue
-            if channel == "dev" and prerelease:
-                # Dev-канал — подходят pre-release тоже, берём первый подходящий
-                pass
-
             version = _parse_version(tag_name)
             if not version:
                 continue
-
-            # Сравнение версий
             if _compare_versions(version, current_version) <= 0:
-                # Версия не выше текущей — ищем дальше (может быть более новая)
                 continue
 
             # Ищем подходящий asset для платформы
@@ -137,12 +129,10 @@ def check_for_updates(
                     download_url = asset.get("browser_download_url")
                     asset_name_found = name
                     break
-
             if not download_url:
-                # Пропускаем релиз без подходящего asset
                 continue
 
-            return {
+            info = {
                 "version": version,
                 "tag_name": tag_name,
                 "download_url": download_url,
@@ -152,7 +142,19 @@ def check_for_updates(
                 "prerelease": prerelease,
             }
 
-        return None
+            if prerelease:
+                # Для dev-канала запоминаем первый pre-release
+                if best_dev is None:
+                    best_dev = info
+            else:
+                # Для любого канала запоминаем первый stable
+                if best_stable is None:
+                    best_stable = info
+
+        # Для dev-канала: сначала pre-release, если нет — stable
+        if channel == "dev" and best_dev:
+            return best_dev
+        return best_stable
 
     except requests.RequestException:
         return None
@@ -230,34 +232,55 @@ def _get_update_script_path() -> str:
         return os.path.join(UPDATE_TEMP_DIR, "update.sh")
 
 
-def _write_update_script(script_path: str, target_exe: str, new_exe: str) -> None:
+def _write_update_script(script_path: str, target_exe: str, new_exe: str,
+                         modules_src: Optional[str] = None,
+                         modules_dst: Optional[str] = None) -> None:
     """
     Создаёт скрипт, который:
     1. Ждёт 2 секунды (чтобы основной процесс завершился)
     2. Копирует новый exe поверх старого
-    3. Запускает новый exe
-    4. Удаляет сам себя
+    3. Копирует папку Modules/ (языки и т.д.) если есть
+    4. Запускает новый exe
+    5. Удаляет сам себя
     """
     os.makedirs(os.path.dirname(script_path), exist_ok=True)
 
     if IS_WIN:
-        content = f"""@echo off
-timeout /t 2 /nobreak >nul
-copy /Y "{new_exe}" "{target_exe}" >nul 2>&1
-start "" "{target_exe}"
-del "%~f0"
-"""
+        lines = [
+            "@echo off",
+            'timeout /t 2 /nobreak >nul',
+            f'copy /Y "{new_exe}" "{target_exe}" >nul 2>&1',
+        ]
+        if modules_src and modules_dst:
+            lines.append(f'if exist "{modules_src}" (')
+            lines.append(f'    if not exist "{modules_dst}" mkdir "{modules_dst}"')
+            lines.append(f'    xcopy /E /Y "{modules_src}" "{modules_dst}" >nul 2>&1')
+            lines.append(')')
+        lines.extend([
+            f'start "" "{target_exe}"',
+            'del "%~f0"',
+        ])
+        content = "\n".join(lines)
         with open(script_path, "w", encoding="cp1251") as f:
             f.write(content)
     else:
         # shell-скрипт для Linux/macOS
-        content = f"""#!/bin/sh
-sleep 2
-cp "{new_exe}" "{target_exe}" 2>/dev/null
-chmod +x "{target_exe}"
-"{target_exe}" &
-rm -- "$0"
-"""
+        lines = [
+            "#!/bin/sh",
+            "sleep 2",
+            f'cp "{new_exe}" "{target_exe}" 2>/dev/null',
+        ]
+        if modules_src and modules_dst:
+            lines.append(f'if [ -d "{modules_src}" ]; then')
+            lines.append(f'    mkdir -p "{modules_dst}"')
+            lines.append(f'    cp -r "{modules_src}/." "{modules_dst}" 2>/dev/null')
+            lines.append('fi')
+        lines.extend([
+            f'chmod +x "{target_exe}"',
+            f'"{target_exe}" &',
+            'rm -- "$0"',
+        ])
+        content = "\n".join(lines)
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(content)
         os.chmod(script_path, 0o755)
@@ -268,8 +291,9 @@ def apply_update(archive_path: str) -> bool:
     Применяет обновление:
     1. Распаковывает архив во временную папку
     2. Находит новый exe
-    3. Создаёт и запускает скрипт-обновлятор
-    4. Завершает текущий процесс
+    3. Находит папку Modules/ (языки и т.д.)
+    4. Создаёт и запускает скрипт-обновлятор
+    5. Завершает текущий процесс
 
     Возвращает True если скрипт запущен, иначе False.
     """
@@ -296,10 +320,23 @@ def apply_update(archive_path: str) -> bool:
         if not new_exe or not os.path.isfile(new_exe):
             return False
 
+        # Ищем папку Modules/ внутри распакованного архива
+        modules_src = None
+        modules_dst = os.path.join(APP_DIR, "Modules")
+        for root, dirs, _files in os.walk(extract_dir):
+            if os.path.basename(root) == "Modules":
+                modules_src = root
+                break
+            # Также проверяем, может Modules лежит прямо в корне
+            if "Modules" in dirs:
+                modules_src = os.path.join(root, "Modules")
+                break
+
         target_exe = os.path.join(APP_DIR, exe_name)
 
         script_path = _get_update_script_path()
-        _write_update_script(script_path, target_exe, new_exe)
+        _write_update_script(script_path, target_exe, new_exe,
+                             modules_src=modules_src, modules_dst=modules_dst)
 
         # Запускаем скрипт
         if IS_WIN:
