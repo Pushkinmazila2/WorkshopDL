@@ -441,10 +441,11 @@ class SettingsTabMixin:
             except Exception as e:
                 errors.append(str(e))
         if errors:
-            self.lbl_cache_status.setText(f"⚠ Ошибка: {errors[0]}")
+            error_message = t("settings_download_cache_error").format(error=errors[0])
+            self.lbl_cache_status.setText(error_message)
             self.lbl_cache_status.setStyleSheet("color: Palette(ToolTipText);")
         else:
-            self.lbl_cache_status.setText("✅ Кеш очищен")
+            self.lbl_cache_status.setText(t("settings_download_cache_clean"))
             self.lbl_cache_status.setStyleSheet("color: Palette(Link);")
 
     # ── Install repo ────────────────────────────────────────────────────────
@@ -613,7 +614,7 @@ class SettingsTabMixin:
     def _apply_language(self, path_override: str = ""):
         path = path_override or self.inp_lang.text().strip()
         if path and not os.path.exists(path):
-            QMessageBox.warning(self, t("app_title"), f"Файл не найден:\n{path}"); return
+            QMessageBox.warning(self, t("app_title"), f"file not foud:\n{path}"); return
 
         game_id   = self.inp_game.text()
         steamcmd  = self.inp_steamcmd.text()

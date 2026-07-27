@@ -165,7 +165,7 @@ class UpdatesTabMixin:
         server_dt = datetime.datetime.fromtimestamp(server_ts).strftime("%Y-%m-%d %H:%M") if server_ts else "—"
         loc_item = cell(local_dt, int(local_ts) if local_ts else 0)
         srv_item = cell(server_dt, server_ts)
-        
+
         COLOR = {"outdated": "#fde8e8", "ok": "#e8fde8",
                  "disabled": "#f0f0f0", "unknown": "#fafafa"}
         ICON  = {"outdated": "🔴", "ok": "🟢", "disabled": "🔘", "unknown": "⚪"}
@@ -273,7 +273,7 @@ class UpdatesTabMixin:
                 self.upd_table.item(row, 0).setText(new_icon)
                 
                 # Меняем текст на кнопке переключения
-                new_lbl = "▶ Включить" if not was_disabled else "⏸ Выкл"
+                new_lbl = t("status_enable") if not was_disabled else t("status_disable")
                 tog.setText(new_lbl)
                 tog.setData(Qt.UserRole + 1, new_folder)
 

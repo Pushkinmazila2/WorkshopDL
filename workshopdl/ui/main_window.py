@@ -128,16 +128,14 @@ class MainWindow(QMainWindow,
 
     # ── Установка модов ───────────────────────────────────────────────────────
     def _offer_install(self, game_id: str, content_folder: str):
-        self._log("🔍 Проверяю инструкцию установки...")
+        self._log(t("installer_log_checking_recipe"))
         cfg = self.cfg
 
         def _bg():
             recipe = install_fetch_recipe(game_id, cfg=cfg)
             if recipe:
-                self._sig_log.emit(
-                    f"📥 Найдена инструкция установки для игры {game_id} "
-                    f"({recipe.get('game_name', '')})"
-                )
+                game_name = recipe.get('game_name', '')
+                self._sig_log.emit(t("installer_log_recipe_found").format(game_id=game_id, game_name=game_name))
                 # Store recipe so the slot doesn't need to re-fetch it
                 self._pending_recipe = recipe
                 QMetaObject.invokeMethod(
@@ -147,10 +145,7 @@ class MainWindow(QMainWindow,
                     Q_ARG(str, content_folder),
                 )
             else:
-                self._sig_log.emit(
-                    f"ℹ Инструкции установки для игры {game_id} нет — "
-                    f"моды остаются в папке загрузки"
-                )
+                self._sig_log.emit(t("installer_log_recipe_missing").format(game_id=game_id))
 
         threading.Thread(target=_bg, daemon=True).start()
 
@@ -163,7 +158,7 @@ class MainWindow(QMainWindow,
         try:
             self._slot_open_install_dialog_impl(game_id, content_folder)
         except Exception as e:
-            self._log(f"❌ Ошибка при открытии диалога установки: {e}")
+            self._log(t("installer_log_dialog_error").format(error=e))
 
     def _slot_open_install_dialog_impl(self, game_id: str, content_folder: str):
         # Use the recipe fetched by _offer_install (stored in _pending_recipe)
@@ -187,27 +182,30 @@ class MainWindow(QMainWindow,
         }
 
         if history_folder:
-            self._log(f"📂 Папка игры из истории: {history_folder}")
+            self._log(t("installer_log_folder_from_history").format(folder=history_folder))
         else:
-            self._log(f"ℹ Папка игры для {game_name} неизвестна — будет найдена при установке")
+            self._log(t("installer_log_folder_unknown").format(game_name=game_name))
 
         # Escape HTML in dynamic content to prevent rich-text rendering issues
         safe_name   = html.escape(str(game_name))
         safe_id     = html.escape(str(game_id))
         safe_desc   = html.escape(str(recipe.get('description', '')))
         safe_folder = html.escape(str(history_folder)) if history_folder else ""
-        hist_note   = f"\n\n📂 Папка игры: {safe_folder}" if history_folder else ""
+        
+        hist_note   = t("installer_dialog_install_history_note").format(folder=safe_folder) if history_folder else ""
 
         reply = QMessageBox.question(
-            self, "📥 Установка модов",
-            f"Найдена инструкция установки для игры:\n"
-            f"<b>{safe_name}</b>  (App ID: {safe_id})\n\n"
-            f"{safe_desc}{hist_note}\n\n"
-            f"Установить скачанные моды прямо сейчас?",
+            self, t("installer_dialog_install_title"),
+            t("installer_dialog_install_text").format(
+                game_name=safe_name, 
+                game_id=safe_id, 
+                description=safe_desc, 
+                history_note=hist_note
+            ),
             QMessageBox.Yes | QMessageBox.No
         )
         if reply != QMessageBox.Yes:
-            self._log("⏭ Установка пропущена пользователем")
+            self._log(t("installer_log_install_skipped"))
             return
 
         mod_ids = [self.mod_list.item(i).text() for i in range(self.mod_list.count())]
@@ -223,10 +221,10 @@ class MainWindow(QMainWindow,
                         break
 
         if not mod_folders:
-            self._log(f"⚠ Папки модов не найдены в {content_folder}")
+            self._log(t("installer_log_mod_folders_missing").format(folder=content_folder))
             return
 
-        self._log(f"📂 Найдено {len(mod_folders)} папок модов для установки")
+        self._log(t("installer_log_mod_folders_found").format(count=len(mod_folders)))
 
         extra_ctx["mod_ids_list"] = list(mod_folders.keys())
         extra_ctx["mod_total"]    = str(len(mod_folders))
@@ -237,7 +235,7 @@ class MainWindow(QMainWindow,
         dlg.exec_()
 
         self._log("\n" + "─" * 50)
-        self._log("Лог установки доступен в окне установщика выше.")
+        self._log(t("installer_log_install_finished_separator"))
 
     # ── Зависимости ───────────────────────────────────────────────────────────
     def _on_deps_found(self, deps: dict):
@@ -250,25 +248,21 @@ class MainWindow(QMainWindow,
 
         if behavior == "auto":
             self._add_deps_to_list(deps)
-            self._log(f"🔗 Авто: добавлено {len(deps)} зависимост(ей) → нажмите ⬇ Скачать")
+            self._log(t("installer_log_deps_auto").format(count=len(deps)))
             return
 
         if behavior == "skip":
-            self._log(f"🔗 Пропущено {len(deps)} зависимост(ей) (настройка: всегда пропускать)")
+            self._log(t("installer_log_deps_skipped").format(count=len(deps)))
             return
 
         lines = "\n".join(f"  • {name}  (ID: {mid})" for mid, name in list(deps.items())[:20])
         if len(deps) > 20:
-            lines += f"\n  ... и ещё {len(deps) - 20}"
+            lines += t("installer_deps_dialog_more").format(count=len(deps) - 20)
 
         msg = QMessageBox(self)
-        msg.setWindowTitle("🔗 Зависимости модов")
+        msg.setWindowTitle(t("installer_deps_dialog_title"))
         msg.setIcon(QMessageBox.Question)
-        msg.setText(
-            f"Найдено <b>{len(deps)}</b> зависимост(ей) которых нет локально:\n\n"
-            f"{lines}\n\n"
-            f"Скачать их?"
-        )
+        msg.setText(t("installer_deps_dialog_text").format(count=len(deps), lines=lines))
         msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         msg.setDefaultButton(QMessageBox.Yes)
         if msg.exec_() == QMessageBox.Yes:
@@ -282,8 +276,9 @@ class MainWindow(QMainWindow,
                 self.mod_list.addItem(mid)
                 added += 1
         if added:
+            self._log(t("installer_log_deps_added").format(count=added))
             self.tabs.setCurrentIndex(0)
-            self._log(f"🔗 Добавлено {added} зависимост(ей) — нажмите ⬇ Скачать")
+
 
     # ── Автообновление программы при запуске ─────────────────────────────────
     def _check_app_updates_startup(self):
