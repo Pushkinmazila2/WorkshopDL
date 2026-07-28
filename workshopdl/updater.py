@@ -50,28 +50,43 @@ def _parse_version(tag_name: str) -> str:
 
 def _compare_versions(v1: str, v2: str) -> int:
     """
-    Сравнивает семантические версии.
+    Сравнивает версии вида:
+      v4.0.55-f202185        (stable)
+      v4.0.55-f202185-dev    (dev)
+    Игнорирует хэш коммита, сравнивает только major.minor.build.
+    Dev-суффикс делает версию меньше stable при равных числовых частях.
     Возвращает -1 если v1 < v2, 0 если равно, 1 если v1 > v2.
     """
     def parse(v: str):
-        parts = v.replace("-", ".").split(".")
-        nums = []
-        for p in parts:
-            try:
-                nums.append(int(p))
-            except ValueError:
-                nums.append(0)
-        return nums
+        # Убираем префикс 'v'
+        v = re.sub(r"^v", "", v)
+        # Разделяем по '-'
+        parts = v.split("-")
+        # Первая часть — числовая (major.minor.build)
+        nums = [int(x) for x in parts[0].split(".")]
+        # Проверяем dev-суффикс в оставшихся частях
+        is_dev = any("dev" in p for p in parts[1:])
+        return nums, is_dev
 
-    a = parse(v1)
-    b = parse(v2)
-    for i in range(max(len(a), len(b))):
-        na = a[i] if i < len(a) else 0
-        nb = b[i] if i < len(b) else 0
-        if na < nb:
+    nums1, dev1 = parse(v1)
+    nums2, dev2 = parse(v2)
+
+    # Сравниваем числовые части
+    max_len = max(len(nums1), len(nums2))
+    for i in range(max_len):
+        n1 = nums1[i] if i < len(nums1) else 0
+        n2 = nums2[i] if i < len(nums2) else 0
+        if n1 < n2:
             return -1
-        if na > nb:
+        if n1 > n2:
             return 1
+
+    # Числовые части равны — сравниваем dev/stable
+    # dev < stable (dev-версия считается ниже, чем stable с тем же номером)
+    if dev1 and not dev2:
+        return -1
+    if not dev1 and dev2:
+        return 1
     return 0
 
 
@@ -107,8 +122,7 @@ def check_for_updates(
         if not isinstance(releases, list) or len(releases) == 0:
             return None
 
-        best_stable = None
-        best_dev = None
+        best_candidate = None
 
         for release in releases:
             tag_name = release.get("tag_name", "")
@@ -117,6 +131,10 @@ def check_for_updates(
             if not version:
                 continue
             if _compare_versions(version, current_version) <= 0:
+                continue
+
+            # Для stable-канала пропускаем pre-release
+            if channel == "stable" and prerelease:
                 continue
 
             # Ищем подходящий asset для платформы
@@ -132,7 +150,9 @@ def check_for_updates(
             if not download_url:
                 continue
 
-            info = {
+            # GitHub API возвращает релизы от новых к старым,
+            # поэтому первый подходящий — самый новый
+            best_candidate = {
                 "version": version,
                 "tag_name": tag_name,
                 "download_url": download_url,
@@ -141,20 +161,9 @@ def check_for_updates(
                 "published_at": release.get("published_at", ""),
                 "prerelease": prerelease,
             }
+            break
 
-            if prerelease:
-                # Для dev-канала запоминаем первый pre-release
-                if best_dev is None:
-                    best_dev = info
-            else:
-                # Для любого канала запоминаем первый stable
-                if best_stable is None:
-                    best_stable = info
-
-        # Для dev-канала: сначала pre-release, если нет — stable
-        if channel == "dev" and best_dev:
-            return best_dev
-        return best_stable
+        return best_candidate
 
     except requests.RequestException:
         return None

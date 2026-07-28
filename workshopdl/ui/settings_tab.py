@@ -728,7 +728,8 @@ class SettingsTabMixin:
         self.lbl_update_status.setStyleSheet("color: Palette(PlaceholderText);")
 
         # Создаём новый worker для скачивания
-        self._dl_worker = AppUpdateWorker()
+        channel = self.cmb_update_channel.currentData()
+        self._dl_worker = AppUpdateWorker(channel=channel)
         self._dl_worker.download_progress.connect(self._on_update_dl_progress)
         self._dl_worker.download_done.connect(self._on_update_dl_done)
         self._dl_worker.download_error.connect(self._on_update_dl_error)

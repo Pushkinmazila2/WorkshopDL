@@ -49,6 +49,13 @@ class AppUpdateWorker(QThread):
     def run(self):
         """Проверяет обновление в фоне."""
         try:
+            # Если _update_info уже установлен (например, после пользовательского
+            # подтверждения скачать обновление), пропускаем повторную проверку
+            # и сразу переходим к скачиванию.
+            if self._update_info is not None and self._download_mode:
+                self._do_download(self._update_info["download_url"])
+                return
+
             info = check_for_updates(
                 current_version=__version__,
                 channel=self.channel,

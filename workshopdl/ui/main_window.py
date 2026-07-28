@@ -311,6 +311,10 @@ class MainWindow(QMainWindow,
         msg.button(QMessageBox.No).setText(t("btn_skip"))
 
         if msg.exec_() == QMessageBox.Yes:
+            # Сохраняем URL и флаг скачивания, затем перезапускаем worker.
+            # Благодаря исправлению в AppUpdateWorker.run() — если _update_info
+            # уже установлен и _download_mode=True, то повторная проверка
+            # обновлений не выполняется, а сразу начинается скачивание.
             self._startup_update_worker._update_info = {"download_url": url}
             self._startup_update_worker._download_mode = True
             self._startup_update_worker.start()
