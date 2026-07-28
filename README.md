@@ -18,6 +18,9 @@ Inspired by the original [WorkshopDL](https://github.com/imwaitingnow/WorkshopDL
 
 ## 🔄 Mod Manager
 <img src="screen/mods_manager.png" width="600">
+
+## 🔄 Mod installer
+<img src="screen/mods_installer.png" width="600">
 ---
 
 ## 🌐 README translations
