@@ -28,9 +28,11 @@ jobs:
         id: gen
         run: |
           # 1. Извлекаем мажорную версию (например, "4.0") из файла
-          # Ищет строку вида __version__ = "4.0" и оставляет только цифры
           INIT_FILE="workshopdl/__init__.py"
-          VERSION_BASE=$(grep -E '^__version__[[:space:]]*=[[:space:]]*["'\''][0-9.]+["'\'']' "$INIT_FILE" | grep -oE '[0-9.]+')
+          
+          # [[:space:]]* в начале позволяет находить строку даже внутри отступов (try/except)
+          # Добавлен || true в конце, чтобы grep не ронял сборку, если ничего не найдено
+          VERSION_BASE=$(grep -E '^[[:space:]]*__version__[[:space:]]*=[[:space:]]*["'\''][0-9.]+["'\'']' "$INIT_FILE" | grep -oE '[0-9.]+' || true)
           
           # Если файл не найден или версия пустая, ставим дефолт, чтобы воркфлоу не упал
           if [ -z "$VERSION_BASE" ]; then
@@ -55,6 +57,7 @@ jobs:
           
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Generated Version Tag: $TAG"
+
 
 
 
