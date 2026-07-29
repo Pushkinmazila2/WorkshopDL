@@ -10,14 +10,7 @@
     macOS   → WorkshopDL-macos.zip
 """
 
-import os
-import re
-import sys
-import json
-import shutil
-import tempfile
-import requests
-import subprocess
+import os, re, sys, json, shutil, tempfile, requests, subprocess
 from typing import Callable, Optional
 
 from workshopdl.config import (
@@ -360,8 +353,9 @@ def apply_update(archive_path: str) -> bool:
                 start_new_session=True,
             )
 
-        # Завершаем текущий процесс
-        sys.exit(0)
+        # Завершаем текущий процесс мгновенно, не вызывая cleanup PyInstaller
+        # (sys.exit(0) удаляет _MEI* папку, что мешает новому процессу запуститься)
+        os._exit(0)
 
     except Exception:
         return False
