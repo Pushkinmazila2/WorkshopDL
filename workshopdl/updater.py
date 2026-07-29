@@ -92,7 +92,7 @@ def check_for_updates(
 
     Параметры:
         current_version — текущая версия программы (из __version__)
-        channel — "stable" (только релизы) или "dev" (включая pre-release)
+        channel — "stable" (только обычные релизы) или "dev" (только pre-release dev-сборки)
 
     Возвращает словарь с информацией о новой версии или None:
         {
@@ -126,8 +126,10 @@ def check_for_updates(
             if _compare_versions(version, current_version) <= 0:
                 continue
 
-            # Для stable-канала пропускаем pre-release
-            if channel == "stable" and prerelease:
+            # Фильтр по каналу:
+            #   stable → только обычные релизы (не pre-release)
+            #   dev    → только pre-release (dev-сборки)
+            if (channel == "stable" and prerelease) or (channel == "dev" and not prerelease):
                 continue
 
             # Ищем подходящий asset для платформы
