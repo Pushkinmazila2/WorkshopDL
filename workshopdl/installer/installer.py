@@ -4,6 +4,12 @@
 
 import os, json, re, glob, shutil, zipfile, importlib, requests
 import xml.etree.ElementTree as ET
+import inspect
+import sys
+import subprocess
+from functools import wraps
+import xml.etree.ElementTree as ET
+
 
 from workshopdl.config import IS_WIN, IS_MAC, IS_LINUX, INSTALL_LOCAL_DIR
 from workshopdl.storage import history_set_game_folder
@@ -16,7 +22,67 @@ from workshopdl.installer.utils import (
 from workshopdl.installer.conditions import _pf_safe_eval_condition, _build_tpl
 from workshopdl.installer.patchers import _pf_patch_ini, _pf_patch_json, _pf_patch_xml, _pf_patch_cfg
 
+def native_msgbox_error(title, text):
+    """Показывает системное окно ошибки на Windows, macOS и Linux без сторонних библиотек."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            # 0x10 — это иконка стоп-ошибки (MB_ICONERROR)
+            ctypes.windll.user32.MessageBoxW(0, text, title, 0x10)
+        elif sys.platform == "darwin":
+            # Нативный AppleScript для macOS
+            script = f'display alert "{title}" message "{text}" as critical'
+            subprocess.run(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            # Для Linux используем zenity или kdialog, если они есть
+            if shutil.which("zenity"):
+                subprocess.run(["zenity", "--error", "--title", title, "--text", text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif shutil.which("kdialog"):
+                subprocess.run(["kdialog", "--title", title, "--error", text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                print(f"[{title}] {text}", file=sys.stderr) # Фолбэк в консоль, если GUI нет
+    except Exception:
+        print(f"[{title}] {text}", file=sys.stderr)
 
+def debug_class_methods(cls):
+    """Декоратор класса, который автоматически оборачивает все его методы в try-except."""
+    
+    def show_error_popup(method_name, exception):
+        title = "Ошибка в компоненте"
+        text = (
+            f"Произошел сбой в методе: {cls.__name__}.{method_name}\n\n"
+            f"Тип ошибки: {type(exception).__name__}\n"
+            f"Текст: {exception}"
+        )
+        native_msgbox_error(title, text)
+
+    # Перебираем все атрибуты класса
+    for attr_name, attr_value in list(cls.__dict__.items()):
+        if inspect.isfunction(attr_value) or isinstance(attr_value, (classmethod, staticmethod)):
+            is_classmethod = isinstance(attr_value, classmethod)
+            is_staticmethod = isinstance(attr_value, staticmethod)
+            
+            original_func = attr_value.__func__ if (is_classmethod or is_staticmethod) else attr_value
+
+            @wraps(original_func)
+            def decorator_wrapper(*args, func_to_call=original_func, name=attr_name, **kwargs):
+                try:
+                    return func_to_call(*args, **kwargs)
+                except Exception as e:
+                    show_error_popup(name, e)
+                    return None  # Дефолтное значение при падении метода
+
+            if is_classmethod:
+                setattr(cls, attr_name, classmethod(decorator_wrapper))
+            elif is_staticmethod:
+                setattr(cls, attr_name, staticmethod(decorator_wrapper))
+            else:
+                setattr(cls, attr_name, decorator_wrapper)
+                
+    return cls
+
+
+@debug_class_methods
 class ModInstaller:
     """
     Выполняет установку одного мода согласно инструкции (recipe).

@@ -54,7 +54,11 @@ def safe_rename(src: str, dst: str) -> str:
             return src
 
 # ── Пути ──────────────────────────────────────────────────────────────────────
-APP_DIR        = os.path.dirname(os.path.abspath(sys.argv[0]))
+# Для PyInstaller (frozen) используем sys.executable, иначе — sys.argv[0]
+if getattr(sys, 'frozen', False):
+    APP_DIR = os.path.dirname(os.path.realpath(sys.executable))
+else:
+    APP_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 STEAMCMD_DEF   = os.path.join(APP_DIR, "steamcmd", STEAMCMD_BIN)
 INI_PATH       = os.path.join(APP_DIR, "WorkshopDL.ini")
 MODULES_PATH   = os.path.join(APP_DIR, "Modules")
@@ -62,6 +66,10 @@ QUEUE_PATH     = os.path.join(MODULES_PATH, "queue.json")
 HISTORY_PATH   = os.path.join(MODULES_PATH, "history.json")
 MOD_PATHS_PATH = os.path.join(MODULES_PATH, "mod_paths.json")
 LANG_DEF_PATH  = os.path.join(APP_DIR, "lang_en.json")   # английский — базовый язык
+
+# ── Автообновление программы ──────────────────────────────────────────────────
+UPDATE_TEMP_DIR   = os.path.join(MODULES_PATH, "update")
+UPDATE_CHANNEL_DEFAULT = "stable"  # "stable" | "dev"
 
 # ── GitHub-интеграция языков ──────────────────────────────────────────────────
 GITHUB_REPO      = "Pushkinmazila2/WorkshopDL"
