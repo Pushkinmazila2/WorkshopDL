@@ -159,6 +159,16 @@ class UpdatesTabMixin:
         self.upd_worker.missing_deps.connect(self._on_missing_deps_found)
         self.upd_worker.start()
 
+    def _on_upd_finished(self):
+        for b in [self.btn_check_upd, self.btn_update_all, self.btn_update_sel,
+                  self.btn_enable_all, self.btn_disable_all]:
+            b.setEnabled(True)
+        
+        self.upd_table.setSortingEnabled(True)
+    
+        self.upd_status.setText(t("msg_check_finished") if "msg_check_finished" in globals() else "Проверка завершена")
+        self.upd_progress.setValue(self.upd_progress.maximum())
+
     def _on_upd_result(self, mod_id, title, local_ts, server_ts, status, folder, size_mb, mod_missing):
         local_dt  = datetime.datetime.fromtimestamp(local_ts).strftime("%Y-%m-%d %H:%M") if local_ts else "—"
         server_dt = datetime.datetime.fromtimestamp(server_ts).strftime("%Y-%m-%d %H:%M") if server_ts else "—"
