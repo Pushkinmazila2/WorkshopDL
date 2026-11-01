@@ -232,6 +232,78 @@ class UpdatesTabMixin:
             f = QFont(); f.setBold(True)
             for col in [0, 1, 2]: self.upd_table.item(row, col).setFont(f)
 
+    def _on_upd_finished(self, outdated, ok_count):
+        self.upd_table.setSortingEnabled(True)
+        self.upd_table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+        self.btn_check_upd.setEnabled(True)
+        disabled = sum(1 for r in range(self.upd_table.rowCount())
+                       if self.upd_table.item(r, 0) and self.upd_table.item(r, 0).text().startswith("🔘"))
+        has_outdated = bool(self._outdated_ids)
+        self.btn_update_all.setEnabled(has_outdated)
+        self.btn_update_sel.setEnabled(has_outdated)
+        self.btn_enable_all.setEnabled(True)
+        self.btn_disable_all.setEnabled(True)
+        total = self.upd_table.rowCount()
+        self.upd_status.setText(
+            t("upd_status_template", total=total, outdated=outdated,
+              ok=ok_count, disabled=disabled)
+        )
+
+    def _on_missing_deps_found(self, deps: dict):
+        """Вызывается когда проверка обновлений нашла незагруженные зависимости."""
+        self._show_deps_dialog(deps, source="updates")
+
+    def _on_deps_found(self, deps: dict):
+        """Вызывается когда воркер скачки нашёл зависимости до старта."""
+        self._show_deps_dialog(deps, source="download")
+
+    def _show_deps_dialog(self, deps: dict, source: str):
+        """Показывает диалог с найденными зависимостями и предлагает скачать."""
+        if not deps: return
+
+        behavior = cfg_get(self.cfg, "WorkshopDL", "DepsBehavior", "ask")
+
+        # Молча скачиваем
+        if behavior == "auto":
+            self._add_deps_to_list(deps)
+            self._log(f"🔗 Авто: добавлено {len(deps)} зависимост(ей) → нажмите ⬇ Скачать")
+            return
+
+        # Молча пропускаем
+        if behavior == "skip":
+            self._log(f"🔗 Пропущено {len(deps)} зависимост(ей) (настройка: всегда пропускать)")
+            return
+
+        # Спрашиваем (behavior == "ask")
+        lines = "\n".join(f"  • {name}  (ID: {mid})" for mid, name in list(deps.items())[:20])
+        if len(deps) > 20:
+            lines += f"\n  ... и ещё {len(deps) - 20}"
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("🔗 Зависимости модов")
+        msg.setIcon(QMessageBox.Icon.Question)
+        msg.setText(
+            f"Найдено <b>{len(deps)}</b> зависимост(ей) которых нет локально:\n\n"
+            f"{lines}\n\n"
+            f"Скачать их?"
+        )
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+        if msg.exec() == QMessageBox.StandardButton.Yes:
+            self._add_deps_to_list(deps)
+
+    def _add_deps_to_list(self, deps: dict):
+        """Добавляет зависимости в список и переключается на вкладку Download."""
+        existing = {self.mod_list.item(i).text() for i in range(self.mod_list.count())}
+        added = 0
+        for mid in deps:
+            if mid not in existing:
+                self.mod_list.addItem(mid)
+                added += 1
+        if added:
+            self.tabs.setCurrentIndex(0)
+            self._log(f"🔗 Добавлено {added} зависимост(ей) — нажмите ⬇ Скачать")
+
 
     # ── Клики по таблице ────────────────────────────────────────────────────
     def _upd_table_clicked(self, row, col):

@@ -2,7 +2,7 @@
 Воркер скачки SteamCMD.
 """
 
-import os, re, subprocess, urllib.request, zipfile, tarfile, ssl
+import os, re, subprocess, urllib.request, zipfile, tarfile, ssl, sys
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from workshopdl.config import APP_DIR, STEAMCMD_BIN, STEAMCMD_DL_URL, STEAMCMD_ARCHIVE_IS_ZIP, IS_WIN
@@ -102,6 +102,8 @@ class SteamCMDInstallWorker(QThread):
         self.log_line.emit("─── SteamCMD self-update ───")
 
         clean_env = os.environ.copy()
+        if sys.platform.startswith("linux"):
+            clean_env["HOME"] = APP_DIR
         clean_env.pop("LD_LIBRARY_PATH", None)
         clean_env.pop("LD_PRELOAD", None)
 

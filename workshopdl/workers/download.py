@@ -5,7 +5,7 @@
 import os, subprocess, re, requests
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from workshopdl.config import IS_WIN
+from workshopdl.config import IS_WIN, IS_LINUX, APP_DIR
 from workshopdl.localization import t
 from workshopdl.steam_api import fetch_dependencies, fetch_mod_details_batch
 from workshopdl.storage import queue_save, queue_clear
@@ -105,8 +105,12 @@ class DownloadWorker(QThread):
 
 
     def _run_batch(self, mod_ids: list) -> dict:
-        args = ([self.steamcmd, "+login", "anonymous"] if self.anonymous
-                else [self.steamcmd, "+login", self.username, self.password])
+        if IS_LINUX:
+            args = ([self.steamcmd, "+force_install_dir", os.path.join(APP_DIR, "Steam"), "+login", "anonymous"] if self.anonymous
+                    else [self.steamcmd, "+force_install_dir", os.path.join(APP_DIR, "Steam"), "+login", self.username, self.password])
+        else:
+            args = ([self.steamcmd, "+login", "anonymous"] if self.anonymous
+                    else [self.steamcmd, "+login", self.username, self.password])
         for mid in mod_ids:
             args += ["+workshop_download_item", self.game_id, mid]
         args += ["+quit"]
@@ -114,6 +118,8 @@ class DownloadWorker(QThread):
         results = {mid: False for mid in mod_ids}
         try:
             clean_env = os.environ.copy()
+            if IS_LINUX:
+                clean_env["HOME"] = APP_DIR
             clean_env.pop("LD_LIBRARY_PATH", None)
             clean_env.pop("LD_PRELOAD", None)
 
@@ -146,7 +152,7 @@ class DownloadWorker(QThread):
             if not info:
                 self.log_line.emit(t("diag_not_found", mod_id=mod_id))
                 return
-            
+
             title = info.get("title", mod_id)
             r = requests.post(
                 "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/",

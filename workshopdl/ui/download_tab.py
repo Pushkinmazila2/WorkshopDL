@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QUrl, pyqtSlot
 from PyQt5.QtGui import QFont, QDesktopServices
 
-from workshopdl.config import cfg_get
+from workshopdl.config import cfg_get, APP_DIR
 from workshopdl.config import open_folder
 from workshopdl.localization import t
 from workshopdl.steam_api import fetch_game_id_for_mod, fetch_collection
@@ -209,14 +209,18 @@ class DownloadTabMixin:
         QMessageBox.information(self, t("app_title"), t("msg_paused", remaining=remaining))
 
     def _on_finished(self, success, fail):
-        import os
+        import os, sys
         from PyQt5.QtWidgets import QMessageBox
         self.btn_download.setEnabled(True); self.btn_pause.setEnabled(False); self.btn_cancel.setEnabled(False)
         self._log("\n" + t("log_separator"))
         self._log(t("log_result", success=success, fail=fail))
         self._log(t("log_separator"))
         game_id = self.inp_game.text().strip()
-        base = os.path.dirname(self._get_steamcmd())
+        if sys.platform.startswith("linux"):
+            base = os.path.join(APP_DIR, "Steam")
+        else:
+            base = os.path.dirname(self._get_steamcmd())
+
         folder = os.path.join(base, "steamapps", "workshop", "content", game_id)
         self._scan_and_refresh_history()
         reply = QMessageBox.question(self, t("app_title"),

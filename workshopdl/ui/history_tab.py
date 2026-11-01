@@ -36,8 +36,11 @@ class HistoryTabMixin:
 
     # ── Слоты ───────────────────────────────────────────────────────────────
     def _scan_and_refresh_history(self):
-        import os
-        base = os.path.dirname(self._get_steamcmd())
+        import os, sys
+        if sys.platform.startswith("linux"):
+            base = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "Steam")
+        else:
+            base = os.path.dirname(self._get_steamcmd())
         history_scan_from_disk(os.path.join(base, "steamapps", "workshop", "content"))
         self._refresh_history()
 
@@ -53,12 +56,15 @@ class HistoryTabMixin:
         if item: self.inp_game.setText(item.data(Qt.UserRole))
 
     def _history_open_folder(self):
-        import os
+        import os, sys
         from PyQt5.QtWidgets import QMessageBox
         item = self.history_list.currentItem()
         if not item: return
         gid = item.data(Qt.UserRole)
-        base = os.path.dirname(self._get_steamcmd())
+        if sys.platform.startswith("linux"):
+            base = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "Steam")
+        else:
+            base = os.path.dirname(self._get_steamcmd())
         folder = os.path.join(base, "steamapps", "workshop", "content", gid)
         if not open_folder(folder):
             QMessageBox.information(self, t("app_title"), t("msg_folder_not_found", path=folder))

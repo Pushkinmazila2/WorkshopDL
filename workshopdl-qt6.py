@@ -359,12 +359,19 @@ class SteamCMDInstallWorker(QThread):
             self.percent.emit(35)
             self.log_line.emit("─── SteamCMD self-update ───")
 
+            clean_env = os.environ.copy()
+            if sys.platform.startswith("linux"):
+                clean_env["HOME"] = APP_DIR
+            clean_env.pop("LD_LIBRARY_PATH", None)
+            clean_env.pop("LD_PRELOAD", None)
+
             flags = subprocess.CREATE_NO_WINDOW if IS_WIN else 0
             proc = subprocess.Popen(
                 [exe_path, "+quit"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace",
-                creationflags=flags
+                creationflags=flags,
+                env=clean_env
             )
 
             import re as _re
@@ -489,7 +496,7 @@ class DownloadWorker(QThread):
         Возвращает {mod_id: True/False}.
         """
         if IS_LINUX:
-            args = ([self.steamcmd, "+force_install_dir", APP_DIR, "+login", "anonymous"] if self.anonymous
+            args = ([self.steamcmd, "+force_install_dir", os.path.join(APP_DIR, "Steam"), "+login", "anonymous"] if self.anonymous
                 else [self.steamcmd, "+force_install_dir", APP_DIR, "+login", self.username, self.password])
         else:
             args = ([self.steamcmd, "+login", "anonymous"] if self.anonymous
@@ -1554,8 +1561,10 @@ class MainWindow(QMainWindow):
         item = self.history_list.currentItem()
         if not item: return
         gid = item.data(Qt.ItemDataRole.UserRole)
-        base = os.path.dirname(self._get_steamcmd())
-        folder = os.path.join(base, "steamapps", "workshop", "content", gid)
+        if IS_LINUX:
+            folder = os.path.join(APP_DIR, "Steam", "steamapps", "workshop", "content", gid)
+        else:
+            folder = os.path.join(os.path.dirname(self._get_steamcmd()), "steamapps", "workshop", "content", gid)
         if not open_folder(folder):
             QMessageBox.information(self, t("app_title"), t("msg_folder_not_found", path=folder))
 
